@@ -78,6 +78,18 @@ intents.guilds = True
 # ----> ADD help_command=None <----
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
+# --- NEW: Global Check for DMs Only ---
+@bot.check
+async def globally_block_guilds(ctx):
+    """Prevents commands from running in server channels (Guilds)."""
+    # ctx.guild will be None if the command is in a DM
+    # Return True if it's a DM (guild is None), False otherwise
+    is_dm = ctx.guild is None
+    if not is_dm:
+        # Optionally log that a command was ignored in a guild
+        logger.debug(f"Command '{ctx.command.name if ctx.command else 'Unknown'}' ignored in guild {ctx.guild.id} by {ctx.author} ({ctx.author.id})")
+    return is_dm
+
 # --- NEW: Data File Paths ---
 VIP_STREAMERS_FILE = 'vip_streamers.json'
 MOD_STREAMERS_FILE = 'mod_streamers.json'
