@@ -60,17 +60,17 @@ log_console_handler.setFormatter(log_formatter)
 logger = logging.getLogger(__name__) # Get logger for this module
 logger.setLevel(logging.INFO)
 logger.addHandler(log_file_handler)
-logger.addHandler(log_console_handler)
+#logger.addHandler(log_console_handler)
 
 discord_logger = logging.getLogger('discord') # Configure discord.py's logger
 discord_logger.setLevel(logging.INFO) # Adjust level as needed (e.g., INFO, WARNING)
 discord_logger.addHandler(log_file_handler)
-discord_logger.addHandler(log_console_handler)
+#discord_logger.addHandler(log_console_handler)
 
 tasks_logger = logging.getLogger('discord.ext.tasks') # Configure tasks logger
 tasks_logger.setLevel(logging.INFO)
 tasks_logger.addHandler(log_file_handler)
-tasks_logger.addHandler(log_console_handler)
+#tasks_logger.addHandler(log_console_handler)
 
 
 # --- Bot Setup ---
