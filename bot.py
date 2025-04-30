@@ -75,7 +75,8 @@ intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
 intents.guilds = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+# ----> ADD help_command=None <----
+bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 # --- NEW: Data File Paths ---
 VIP_STREAMERS_FILE = 'vip_streamers.json'
@@ -336,6 +337,196 @@ def is_allowed_user():
     return commands.check(predicate)
 
 # --- Bot Commands ---
+
+@bot.command(name='help', help='Shows this help message with all available commands.')
+@is_allowed_user() # Keep restricted or remove decorator to make public
+async def custom_help(ctx):
+    """Displays a custom help message listing all commands."""
+    embed = discord.Embed(
+        title="Bot Command Help",
+        description="Here are the available commands:",
+        color=discord.Color.blurple() # Or any color you like
+    )
+
+    # --- VIP Management ---
+    vip_cmds = ""
+    vip_cmds += f"`{bot.command_prefix}addvipstreamer <username>` - {bot.get_command('addvipstreamer').help}\n"
+    vip_cmds += f"`{bot.command_prefix}removevipstreamer <username>` - {bot.get_command('removevipstreamer').help}\n"
+    vip_cmds += f"`{bot.command_prefix}listvipstreamers` - {bot.get_command('listvipstreamers').help}\n"
+    embed.add_field(name="👑 VIP Streamer Management", value=vip_cmds, inline=False)
+
+    # --- Mod Management ---
+    mod_cmds = ""
+    mod_cmds += f"`{bot.command_prefix}addmodstreamer <username>` - {bot.get_command('addmodstreamer').help}\n"
+    mod_cmds += f"`{bot.command_prefix}removemodstreamer <username>` - {bot.get_command('removemodstreamer').help}\n"
+    mod_cmds += f"`{bot.command_prefix}listmodstreamers` - {bot.get_command('listmodstreamers').help}\n"
+    embed.add_field(name="🛡️ Mod Streamer Management", value=mod_cmds, inline=False)
+
+    # --- Configuration ---
+    config_cmds = ""
+    config_cmds += f"`{bot.command_prefix}setvipchannel <channel_id>` - {bot.get_command('setvipchannel').help}\n"
+    config_cmds += f"`{bot.command_prefix}setmodchannel <channel_id>` - {bot.get_command('setmodchannel').help}\n"
+    config_cmds += f"`{bot.command_prefix}adduser <user_id_or_@mention>` - Adds a user to the authorized list.\n" # Help text added here
+    config_cmds += f"`{bot.command_prefix}removeuser <user_id_or_@mention>` - Removes a user from the authorized list.\n" # Help text added here
+    embed.add_field(name="⚙️ Configuration", value=config_cmds, inline=False)
+
+    # --- General Commands ---
+    general_cmds = ""
+    general_cmds += f"`{bot.command_prefix}checknow` - {bot.get_command('checknow').help}\n"
+    general_cmds += f"`{bot.command_prefix}status` - {bot.get_command('status').help}\n"
+    general_cmds += f"`{bot.command_prefix}help` - {bot.get_command('help').help}\n" # Reference itself
+    embed.add_field(name="ℹ️ General / Status", value=general_cmds, inline=False)
+
+    embed.set_footer(text="Use the specified commands in DMs or server channels.")
+    await ctx.send(embed=embed)
+
+@custom_help.error
+async def custom_help_error(ctx, error):
+    if isinstance(error, commands.CheckFailure):
+         await ctx.send("🚫 You are not authorized to use the help command.") # Or make help public
+    else:
+        logger.error(f"Error in help command: {error}", exc_info=True)
+        await ctx.send("❌ An unexpected error occurred while displaying help.")
+
+# --- NEW: User Management Commands ---
+
+async def update_allowed_users_env():
+    """Helper function to update the ALLOWED_USER_IDS string in .env"""
+    global ALLOWED_USER_IDS
+    try:
+        dotenv_path = find_dotenv()
+        if not dotenv_path:
+            dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+            if not os.path.exists(dotenv_path):
+                logger.error("Could not find .env file path to update allowed users.")
+                return False # Indicate failure
+
+        # Convert the set back to a comma-separated string
+        ids_string = ",".join(map(str, sorted(list(ALLOWED_USER_IDS))))
+        success = set_key(dotenv_path, "ALLOWED_USER_IDS", ids_string)
+        if not success:
+            logger.error(f"Failed to update ALLOWED_USER_IDS in .env file at {dotenv_path}")
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Error updating ALLOWED_USER_IDS in .env: {e}", exc_info=True)
+        return False
+
+@bot.command(name='adduser', help='Adds a user to the authorized list. Usage: !adduser <user_id_or_@mention>')
+@is_allowed_user()
+async def add_user(ctx, user_input: str):
+    """Adds a user ID to the allowed list and updates .env"""
+    global ALLOWED_USER_IDS
+
+    user_id = None
+    # Try converting mention to ID first
+    if user_input.startswith('<@') and user_input.endswith('>'):
+        try:
+            # Extract ID from mention (handles <@!ID> and <@ID>)
+            user_id = int(user_input.strip('<@!>'))
+        except ValueError:
+            pass # Will try direct int conversion next
+
+    # Try converting string directly to ID
+    if user_id is None:
+        try:
+            user_id = int(user_input)
+        except ValueError:
+            await ctx.send("⚠️ Invalid input. Please provide a valid User ID (numbers only) or mention the user (`@User`).")
+            return
+
+    # Check if user is already allowed
+    if user_id in ALLOWED_USER_IDS:
+        await ctx.send(f"User ID `{user_id}` is already authorized.")
+        return
+
+    # Optional: Verify user exists in Discord? (Needs fetch_user, can be slow/rate-limited)
+    # try:
+    #     target_user = await bot.fetch_user(user_id)
+    #     display_name = f"{target_user.name}#{target_user.discriminator}" # Older format
+    #     # display_name = target_user.display_name # Newer format
+    # except discord.NotFound:
+    #     await ctx.send(f"⚠️ Could not find a Discord user with ID `{user_id}`.")
+    #     return
+    # except discord.HTTPException:
+    #     await ctx.send("⚠️ Failed to verify user ID with Discord.")
+    #     return # Or proceed cautiously
+
+    # Add to the set (in memory)
+    ALLOWED_USER_IDS.add(user_id)
+
+    # Update the .env file
+    if await update_allowed_users_env():
+        logger.info(f"User {ctx.author} added authorized user ID: {user_id}")
+        # Use display_name if fetched, otherwise just the ID
+        await ctx.send(f"✅ Successfully added User ID `{user_id}` to the authorized list.")
+    else:
+        # Revert the change in memory if saving failed
+        ALLOWED_USER_IDS.remove(user_id)
+        await ctx.send("❌ Error: Failed to update the configuration file. The user was not added.")
+
+@add_user.error
+async def add_user_error(ctx, error):
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("⚠️ Please provide the User ID or mention the user. Usage: `!adduser <user_id_or_@mention>`")
+    elif isinstance(error, commands.CheckFailure):
+         await ctx.send("🚫 You are not authorized to use this command.")
+    else:
+        logger.error(f"Error in adduser command: {error}", exc_info=True)
+        await ctx.send("❌ An unexpected error occurred.")
+
+
+@bot.command(name='removeuser', help='Removes a user from the authorized list. Usage: !removeuser <user_id_or_@mention>')
+@is_allowed_user()
+async def remove_user(ctx, user_input: str):
+    """Removes a user ID from the allowed list and updates .env"""
+    global ALLOWED_USER_IDS
+
+    user_id = None
+    if user_input.startswith('<@') and user_input.endswith('>'):
+        try:
+            user_id = int(user_input.strip('<@!>'))
+        except ValueError: pass
+    if user_id is None:
+        try:
+            user_id = int(user_input)
+        except ValueError:
+            await ctx.send("⚠️ Invalid input. Please provide a valid User ID (numbers only) or mention the user (`@User`).")
+            return
+
+    # Prevent removing the last user? Or removing self?
+    # if user_id == ctx.author.id:
+    #     await ctx.send("🚫 You cannot remove yourself from the authorized list.")
+    #     return
+    if len(ALLOWED_USER_IDS) <= 1 and user_id in ALLOWED_USER_IDS:
+        await ctx.send("🚫 Cannot remove the last authorized user.")
+        return
+
+    if user_id not in ALLOWED_USER_IDS:
+        await ctx.send(f"User ID `{user_id}` is not currently in the authorized list.")
+        return
+
+    # Remove from the set (in memory)
+    ALLOWED_USER_IDS.remove(user_id)
+
+    # Update the .env file
+    if await update_allowed_users_env():
+        logger.info(f"User {ctx.author} removed authorized user ID: {user_id}")
+        await ctx.send(f"✅ Successfully removed User ID `{user_id}` from the authorized list.")
+    else:
+        # Revert the change in memory if saving failed
+        ALLOWED_USER_IDS.add(user_id) # Add it back
+        await ctx.send("❌ Error: Failed to update the configuration file. The user was not removed.")
+
+@remove_user.error
+async def remove_user_error(ctx, error):
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("⚠️ Please provide the User ID or mention the user. Usage: `!removeuser <user_id_or_@mention>`")
+    elif isinstance(error, commands.CheckFailure):
+         await ctx.send("🚫 You are not authorized to use this command.")
+    else:
+        logger.error(f"Error in removeuser command: {error}", exc_info=True)
+        await ctx.send("❌ An unexpected error occurred.")
 
 # --- NEW: VIP Streamer Commands ---
 @bot.command(name='addvipstreamer', help='Adds a VIP Twitch streamer. Usage: !addvipstreamer <username>')
