@@ -4,7 +4,7 @@ import requests
 import json
 import os
 import asyncio
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key, find_dotenv
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Set, Dict, Any
@@ -469,6 +469,125 @@ async def list_mod_streamers_error(ctx, error):
     if isinstance(error, commands.CheckFailure): await ctx.send("🚫 You are not authorized.")
     else: logger.error(f"Error in listmodstreamers: {error}", exc_info=True); await ctx.send("❌ Error.")
 
+
+@bot.command(name='setvipchannel', help='Sets the channel ID for VIP notifications. Usage: !setvipchannel <channel_id>')
+@is_allowed_user()
+async def set_vip_channel(ctx, channel_id_str: str):
+    """Sets the VIP notification channel ID persistently."""
+    global VIP_CHANNEL_ID # Declare intent to modify global variable
+
+    try:
+        new_channel_id = int(channel_id_str)
+    except ValueError:
+        await ctx.send("⚠️ Invalid input. Please provide a valid channel ID (numbers only).")
+        return
+
+    # Verify the channel exists and the bot can see it
+    target_channel = ctx.bot.get_channel(new_channel_id)
+    if target_channel is None:
+        await ctx.send(f"⚠️ Cannot find channel with ID `{new_channel_id}` or the bot doesn't have access to it.")
+        return
+    # Optional: Check channel type (must be text channel)
+    if not isinstance(target_channel, discord.TextChannel):
+         await ctx.send(f"⚠️ Channel `{target_channel.name}` (ID: {new_channel_id}) is not a text channel.")
+         return
+    # Optional: Check permissions in the new channel? (Send Messages, Embed Links, Manage Messages)
+    # bot_perms = target_channel.permissions_for(ctx.guild.me) # Requires ctx.guild, might fail in DMs
+    # if not bot_perms.send_messages or not bot_perms.embed_links or not bot_perms.manage_messages:
+    #     await ctx.send(f"⚠️ Bot might lack necessary permissions (Send/Embed/Manage) in channel {target_channel.mention}.")
+    #     # You might choose to proceed anyway or stop here
+
+    try:
+        # Find the .env file path
+        dotenv_path = find_dotenv()
+        if not dotenv_path:
+             # Fallback if find_dotenv fails (e.g., if .env is not in standard locations)
+             dotenv_path = os.path.join(os.path.dirname(__file__), '.env') # Assumes .env is in same dir as bot.py
+             if not os.path.exists(dotenv_path):
+                 logger.error("Could not find .env file path to update.")
+                 await ctx.send("❌ Critical error: Could not locate the .env file to update.")
+                 return
+
+        # Update the .env file
+        success = set_key(dotenv_path, "VIP_CHANNEL_ID", str(new_channel_id))
+
+        if success:
+            # Update the global variable in the running script
+            VIP_CHANNEL_ID = new_channel_id
+            logger.info(f"VIP Channel ID updated to {new_channel_id} by {ctx.author} ({ctx.author.id})")
+            await ctx.send(f"✅ VIP notification channel successfully set to {target_channel.mention} (ID: `{new_channel_id}`). Change is active immediately.")
+        else:
+            # This might happen if set_key fails for some reason (e.g., permissions)
+            logger.error(f"Failed to update VIP_CHANNEL_ID in .env file at {dotenv_path}")
+            await ctx.send("❌ Error: Failed to update the configuration file. Check file permissions.")
+
+    except Exception as e:
+        logger.error(f"Error setting VIP channel ID: {e}", exc_info=True)
+        await ctx.send("❌ An unexpected error occurred while updating the channel configuration.")
+
+@set_vip_channel.error
+async def set_vip_channel_error(ctx, error):
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("⚠️ Please provide the channel ID. Usage: `!setvipchannel <channel_id>`")
+    elif isinstance(error, commands.CheckFailure):
+         await ctx.send("🚫 You are not authorized to use this command.")
+    else:
+        logger.error(f"Error in setvipchannel command: {error}", exc_info=True)
+        await ctx.send("❌ An unexpected error occurred.")
+
+
+@bot.command(name='setmodchannel', help='Sets the channel ID for Mod notifications. Usage: !setmodchannel <channel_id>')
+@is_allowed_user()
+async def set_mod_channel(ctx, channel_id_str: str):
+    """Sets the Mod notification channel ID persistently."""
+    global MOD_CHANNEL_ID # Declare intent to modify global variable
+
+    try:
+        new_channel_id = int(channel_id_str)
+    except ValueError:
+        await ctx.send("⚠️ Invalid input. Please provide a valid channel ID (numbers only).")
+        return
+
+    target_channel = ctx.bot.get_channel(new_channel_id)
+    if target_channel is None:
+        await ctx.send(f"⚠️ Cannot find channel with ID `{new_channel_id}` or the bot doesn't have access to it.")
+        return
+    if not isinstance(target_channel, discord.TextChannel):
+         await ctx.send(f"⚠️ Channel `{target_channel.name}` (ID: {new_channel_id}) is not a text channel.")
+         return
+
+    try:
+        dotenv_path = find_dotenv()
+        if not dotenv_path:
+             dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+             if not os.path.exists(dotenv_path):
+                 logger.error("Could not find .env file path to update.")
+                 await ctx.send("❌ Critical error: Could not locate the .env file to update.")
+                 return
+
+        success = set_key(dotenv_path, "MOD_CHANNEL_ID", str(new_channel_id))
+
+        if success:
+            MOD_CHANNEL_ID = new_channel_id
+            logger.info(f"Mod Channel ID updated to {new_channel_id} by {ctx.author} ({ctx.author.id})")
+            await ctx.send(f"✅ Mod notification channel successfully set to {target_channel.mention} (ID: `{new_channel_id}`). Change is active immediately.")
+        else:
+            logger.error(f"Failed to update MOD_CHANNEL_ID in .env file at {dotenv_path}")
+            await ctx.send("❌ Error: Failed to update the configuration file. Check file permissions.")
+
+    except Exception as e:
+        logger.error(f"Error setting Mod channel ID: {e}", exc_info=True)
+        await ctx.send("❌ An unexpected error occurred while updating the channel configuration.")
+
+@set_mod_channel.error
+async def set_mod_channel_error(ctx, error):
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("⚠️ Please provide the channel ID. Usage: `!setmodchannel <channel_id>`")
+    elif isinstance(error, commands.CheckFailure):
+         await ctx.send("🚫 You are not authorized to use this command.")
+    else:
+        logger.error(f"Error in setmodchannel command: {error}", exc_info=True)
+        await ctx.send("❌ An unexpected error occurred.")
 
 # --- UPDATED: Status Command ---
 @bot.command(name='status', help='Checks the bot\'s operational status.')
