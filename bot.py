@@ -674,30 +674,6 @@ async def custom_help_error(ctx, error):
     else: logger.error(f"Error in help command processing: {error}", exc_info=True); await ctx.send("❌ Error displaying help.")
 
 
-# --- Background Task ---
-# ... (Your existing check_streams loop definitions) ...
-
-# --- Run the Bot ---
-# ... (Your existing __main__ block) ...
-Use code with caution.
-Python
-Summary of the Reordering:
-
-VIP Commands (add/remove/listvipstreamer)
-
-Mod Commands (add/remove/listmodstreamer)
-
-Channel Config Commands (setvip/modchannel)
-
-User Management Commands (adduser, removeuser, and their helper)
-
-General Commands (checknow, status)
-
-Help Command (custom_help)
-
-Make sure you replace the command definitions in your file with this correctly ordered sequence. Then deploy and restart the bot.
-
-
 # --- Background Task (check_streams and helpers are UNCHANGED from previous state) ---
 @tasks.loop(minutes=1.0)
 async def check_streams():
