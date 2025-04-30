@@ -1,0 +1,33 @@
+# Python runtime files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env
+
+# Sensitive credentials file
+.env
+
+# IDE / Editor specific files
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Data files (optional, depends if you want to commit placeholder versions)
+# streamers.json
+# live_messages.json
+
+# AWS Key Files (NEVER COMMIT THESE)
+*.pem
