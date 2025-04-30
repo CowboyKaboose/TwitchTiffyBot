@@ -257,7 +257,7 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
                          embed.set_image(url=status['thumbnail_url'])
                     embed.set_footer(text="Click the title to watch!")
                     # Add specific ping/mention if desired for the tier
-                    mention = "@everyone" # Customize per tier if needed
+                    mention = "Chat" # Customize per tier if needed
                     message = await channel.send(f"🎉 Hey {mention}! `{streamer_login}` ({tier_name}) just went live! 🎉", embed=embed, allowed_mentions=discord.AllowedMentions(everyone=True)) # Adjust allowed_mentions
 
                     live_messages[streamer_login] = message.id
