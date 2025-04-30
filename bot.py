@@ -338,6 +338,7 @@ def is_allowed_user():
 
 # --- Bot Commands ---
 
+# --- NEW: Custom Help Command ---
 @bot.command(name='help', help='Shows this help message with all available commands.')
 @is_allowed_user() # Keep restricted or remove decorator to make public
 async def custom_help(ctx):
@@ -345,36 +346,37 @@ async def custom_help(ctx):
     embed = discord.Embed(
         title="Bot Command Help",
         description="Here are the available commands:",
-        color=discord.Color.blurple() # Or any color you like
+        color=discord.Color.blurple()
     )
 
     # --- VIP Management ---
+    # Use direct command reference (e.g., add_vip_streamer.help)
     vip_cmds = ""
-    vip_cmds += f"`{bot.command_prefix}addvipstreamer <username>` - {bot.get_command('addvipstreamer').help}\n"
-    vip_cmds += f"`{bot.command_prefix}removevipstreamer <username>` - {bot.get_command('removevipstreamer').help}\n"
-    vip_cmds += f"`{bot.command_prefix}listvipstreamers` - {bot.get_command('listvipstreamers').help}\n"
+    vip_cmds += f"`{bot.command_prefix}addvipstreamer <username>` - {add_vip_streamer.help}\n"
+    vip_cmds += f"`{bot.command_prefix}removevipstreamer <username>` - {remove_vip_streamer.help}\n"
+    vip_cmds += f"`{bot.command_prefix}listvipstreamers` - {list_vip_streamers.help}\n"
     embed.add_field(name="👑 VIP Streamer Management", value=vip_cmds, inline=False)
 
     # --- Mod Management ---
     mod_cmds = ""
-    mod_cmds += f"`{bot.command_prefix}addmodstreamer <username>` - {bot.get_command('addmodstreamer').help}\n"
-    mod_cmds += f"`{bot.command_prefix}removemodstreamer <username>` - {bot.get_command('removemodstreamer').help}\n"
-    mod_cmds += f"`{bot.command_prefix}listmodstreamers` - {bot.get_command('listmodstreamers').help}\n"
+    mod_cmds += f"`{bot.command_prefix}addmodstreamer <username>` - {add_mod_streamer.help}\n"
+    mod_cmds += f"`{bot.command_prefix}removemodstreamer <username>` - {remove_mod_streamer.help}\n"
+    mod_cmds += f"`{bot.command_prefix}listmodstreamers` - {list_mod_streamers.help}\n"
     embed.add_field(name="🛡️ Mod Streamer Management", value=mod_cmds, inline=False)
 
     # --- Configuration ---
     config_cmds = ""
-    config_cmds += f"`{bot.command_prefix}setvipchannel <channel_id>` - {bot.get_command('setvipchannel').help}\n"
-    config_cmds += f"`{bot.command_prefix}setmodchannel <channel_id>` - {bot.get_command('setmodchannel').help}\n"
-    config_cmds += f"`{bot.command_prefix}adduser <user_id_or_@mention>` - Adds a user to the authorized list.\n" # Help text added here
-    config_cmds += f"`{bot.command_prefix}removeuser <user_id_or_@mention>` - Removes a user from the authorized list.\n" # Help text added here
+    config_cmds += f"`{bot.command_prefix}setvipchannel <channel_id>` - {set_vip_channel.help}\n"
+    config_cmds += f"`{bot.command_prefix}setmodchannel <channel_id>` - {set_mod_channel.help}\n"
+    config_cmds += f"`{bot.command_prefix}adduser <user_id_or_@mention>` - {add_user.help}\n"
+    config_cmds += f"`{bot.command_prefix}removeuser <user_id_or_@mention>` - {remove_user.help}\n"
     embed.add_field(name="⚙️ Configuration", value=config_cmds, inline=False)
 
     # --- General Commands ---
     general_cmds = ""
-    general_cmds += f"`{bot.command_prefix}checknow` - {bot.get_command('checknow').help}\n"
-    general_cmds += f"`{bot.command_prefix}status` - {bot.get_command('status').help}\n"
-    general_cmds += f"`{bot.command_prefix}help` - {bot.get_command('help').help}\n" # Reference itself
+    general_cmds += f"`{bot.command_prefix}checknow` - {check_now.help}\n"
+    general_cmds += f"`{bot.command_prefix}status` - {status.help}\n"
+    general_cmds += f"`{bot.command_prefix}help` - {custom_help.help}\n" # Reference itself by function name
     embed.add_field(name="ℹ️ General / Status", value=general_cmds, inline=False)
 
     embed.set_footer(text="Use the specified commands in DMs or server channels.")
@@ -382,10 +384,23 @@ async def custom_help(ctx):
 
 @custom_help.error
 async def custom_help_error(ctx, error):
+    # Handle the specific case where the error comes from invoking help
+    if isinstance(error, commands.CommandInvokeError):
+        original_error = error.original
+        # Log the original error for debugging if it's not just the check failure
+        if not isinstance(original_error, commands.CheckFailure):
+             logger.error(f"Error invoking help command: {original_error}", exc_info=original_error)
+        # Check if the original error was the CheckFailure from is_allowed_user
+        if isinstance(original_error, commands.CheckFailure):
+             await ctx.send("🚫 You are not authorized to use the help command.")
+             return # Prevent further default error handling for this specific case
+
+    # Handle CheckFailure if it's raised directly (e.g., if help itself was restricted)
     if isinstance(error, commands.CheckFailure):
-         await ctx.send("🚫 You are not authorized to use the help command.") # Or make help public
+         await ctx.send("🚫 You are not authorized to use the help command.")
     else:
-        logger.error(f"Error in help command: {error}", exc_info=True)
+        # Log other unexpected errors
+        logger.error(f"Error in help command processing: {error}", exc_info=True)
         await ctx.send("❌ An unexpected error occurred while displaying help.")
 
 # --- NEW: User Management Commands ---
