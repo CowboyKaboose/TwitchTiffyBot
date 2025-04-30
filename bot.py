@@ -18,6 +18,11 @@ TWITCH_CLIENT_SECRET = os.getenv('TWITCH_CLIENT_SECRET')
 TARGET_CHANNEL_ID_STR = os.getenv('TARGET_CHANNEL_ID')
 ALLOWED_USER_IDS_STR = os.getenv('ALLOWED_USER_IDS', '')
 
+# --- Global Variables ---
+twitch_access_token = None
+token_expiry_time = datetime.now(timezone.utc)
+last_successful_check_time = None # Add this line
+
 # Validate TARGET_CHANNEL_ID
 TARGET_CHANNEL_ID: int = 0 # Default or placeholder
 try:
@@ -222,6 +227,7 @@ async def perform_stream_check(bot_instance: commands.Bot):
     live_messages = load_data(LIVE_MESSAGES_FILE)
     channel = bot_instance.get_channel(TARGET_CHANNEL_ID)
 
+
     if not channel:
         # Log error only once per certain interval or if state changes? For now, log each time.
         logger.error(f"Target channel with ID {TARGET_CHANNEL_ID} not found during check. Bot might lack access or ID is wrong.")
@@ -333,6 +339,9 @@ async def perform_stream_check(bot_instance: commands.Bot):
         save_data(LIVE_MESSAGES_FILE, live_messages)
         logger.info("Live messages file updated.")
 
+    global last_successful_check_time
+    last_successful_check_time = datetime.now(timezone.utc)
+    logger.info("Stream check cycle completed successfully.")
     return True # Indicate success/completion
 
 # --- Bot Events ---
@@ -481,6 +490,54 @@ async def check_now_error(ctx, error):
      else:
          logger.error(f"Error in checknow command: {error}", exc_info=True)
          await ctx.send("❌ An unexpected error occurred during manual check.")
+
+@bot.command(name='status', help='Checks the bot\'s operational status. (Authorized users only)')
+@is_allowed_user()
+async def status(ctx):
+    """Reports the status of the bot's background tasks."""
+    global last_successful_check_time
+
+    embed = discord.Embed(title="Bot Status Report", color=discord.Color.green())
+
+    # Check background loop status
+    loop_running = check_streams.is_running()
+    embed.add_field(name="Stream Check Loop Active?", value=f"{'✅ Yes' if loop_running else '❌ No'}", inline=True)
+
+    if not loop_running:
+        embed.color = discord.Color.orange() # Change color if loop stopped
+        try:
+            # Attempt to get exception if loop stopped unexpectedly
+            exception = check_streams.get_task().exception()
+            if exception:
+                embed.add_field(name="Loop Error", value=f"```\n{str(exception)[:1000]}\n```", inline=False) # Show first 1000 chars
+                embed.color = discord.Color.red()
+        except Exception:
+            # Ignore if task/exception retrieval fails
+            pass
+
+    # Report last successful check time
+    if last_successful_check_time:
+        # Format timestamp for Discord <t:unix_timestamp:R> for relative time
+        timestamp_str = f"<t:{int(last_successful_check_time.timestamp())}:R>"
+        embed.add_field(name="Last Successful Check", value=timestamp_str, inline=True)
+    else:
+        embed.add_field(name="Last Successful Check", value="N/A (Bot recently started or loop hasn't completed)", inline=True)
+
+    # Report watchlist size
+    streamers = load_data(STREAMERS_FILE)
+    embed.add_field(name="Watchlist Size", value=f"{len(streamers)} streamer(s)", inline=True)
+
+    embed.set_footer(text=f"Checked at: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z')}")
+
+    await ctx.send(embed=embed)
+
+@status.error
+async def status_error(ctx, error):
+    if isinstance(error, commands.CheckFailure):
+         await ctx.send("🚫 You are not authorized to use this command.")
+    else:
+        logger.error(f"Error in status command: {error}", exc_info=True)
+        await ctx.send("❌ An unexpected error occurred while checking status.")
 
 # --- Background Task ---
 @tasks.loop(minutes=1.0) # Check frequency
