@@ -210,28 +210,35 @@ async def get_stream_status(streamer_login):
         logger.error(f"Unexpected error checking stream status for {streamer_login}: {e}", exc_info=True)
         return None
 
-# --- NEW: Refactored Tier Checking Logic ---
+# --- Refactored Tier Checking Logic ---
 async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, streamer_logins: List[str], target_channel_id: int, live_messages_file: str):
-    """Checks a specific tier of streamers and handles notifications."""
-    if not streamer_logins:
-        # logger.info(f"No streamers to check for {tier_name} tier.")
-        return # Nothing to do for this tier
+    """Checks a specific tier of streamers and handles notifications, including updates."""
+    if not streamer_logins: return
+
+    # --- Load live messages. Ensure it's a dictionary. ---
+    live_messages: Dict[str, int] = load_data(live_messages_file)
+    # Basic type check in case the file was corrupted/empty incorrectly
+    if not isinstance(live_messages, dict):
+        logger.error(f"[{tier_name}] Live messages data in {live_messages_file} is not a dictionary. Resetting. Data: {live_messages}")
+        live_messages = {} # Reset to avoid errors
+        save_data(live_messages_file, live_messages) # Save the reset state
 
     logger.info(f"Performing check for {tier_name} tier: {', '.join(streamer_logins)}")
-    live_messages: Dict[str, int] = load_data(live_messages_file)
     channel = bot_instance.get_channel(target_channel_id)
 
     if not channel:
-        logger.error(f"{tier_name} target channel ({target_channel_id}) not found. Cannot send/delete messages for this tier.")
-        return # Cannot proceed without the channel
+        logger.error(f"{tier_name} target channel ({target_channel_id}) not found.")
+        return
 
     current_live_mapping = live_messages.copy()
     changes_made = False
+    now = datetime.now(timezone.utc) # Get current time once per check cycle
 
     for streamer_login in streamer_logins:
+        message_id_to_delete_later = None # Flag if deletion needed after loop iteration
         try:
             status = await get_stream_status(streamer_login)
-            await asyncio.sleep(0.2) # Pace API calls
+            await asyncio.sleep(0.2)
 
             if status is None:
                 logger.warning(f"[{tier_name}] Skipping update for {streamer_login} due to API/fetch error.")
@@ -242,67 +249,109 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
 
             # --- Scenario 1: Streamer went LIVE ---
             if is_live and not is_currently_posted:
+                # --- (Code for posting NEW message - UNCHANGED) ---
                 logger.info(f"[{tier_name}] {streamer_login} went LIVE!")
                 try:
                     embed = discord.Embed(
-                        title=f"🔴 {streamer_login} is now LIVE! ({tier_name.upper()})", # Indicate tier in title
+                        title=f"🔴 {streamer_login} is now LIVE! ({tier_name.upper()})",
                         url=f"https://twitch.tv/{streamer_login}",
                         description=status.get('title', 'No Title Provided'),
-                        color=discord.Color.purple(),
-                        timestamp=datetime.now(timezone.utc)
+                        color=discord.Color.purple(), timestamp=now
                     )
                     embed.add_field(name="Game", value=status.get('game_name', 'N/A'), inline=True)
                     embed.add_field(name="Viewers", value=f"{status.get('viewer_count', 'N/A'):,}", inline=True)
-                    if status.get('thumbnail_url'):
-                         embed.set_image(url=status['thumbnail_url'])
+                    if status.get('thumbnail_url'): embed.set_image(url=status['thumbnail_url'])
                     embed.set_footer(text="Click the title to watch!")
-                    # Add specific ping/mention if desired for the tier
-                    mention = "Chat" # Customize per tier if needed
-                    message = await channel.send(f"🎉 Hey {mention}! `{streamer_login}` ({tier_name}) just went live! 🎉", embed=embed, allowed_mentions=discord.AllowedMentions(everyone=True)) # Adjust allowed_mentions
+                    mention = "@everyone" # Customize per tier if needed
+                    message = await channel.send(f"🎉 Hey {mention}! `{streamer_login}` ({tier_name}) just went live! 🎉", embed=embed, allowed_mentions=discord.AllowedMentions(everyone=True))
 
-                    live_messages[streamer_login] = message.id
+                    live_messages[streamer_login] = message.id # Store the ID
                     changes_made = True
                     logger.info(f"[{tier_name}] Posted live notification for {streamer_login} (Message ID: {message.id})")
-
-                except discord.Forbidden:
-                    logger.error(f"[{tier_name}] Bot lacks permissions (Send Messages/Embed Links) in channel {target_channel_id}.")
-                except discord.HTTPException as e:
-                     logger.error(f"[{tier_name}] HTTP error sending live notification for {streamer_login}: {e.status} {e.text}")
-                except Exception as e:
-                    logger.error(f"[{tier_name}] Error sending live notification for {streamer_login}: {e}", exc_info=True)
+                except discord.Forbidden: logger.error(f"[{tier_name}] Bot lacks permissions (Send/Embed) in {target_channel_id}.")
+                except discord.HTTPException as e: logger.error(f"[{tier_name}] HTTP error sending msg for {streamer_login}: {e.status} {e.text}")
+                except Exception as e: logger.error(f"[{tier_name}] Error sending msg for {streamer_login}: {e}", exc_info=True)
+            # --- End Scenario 1 ---
 
             # --- Scenario 2: Streamer went OFFLINE ---
             elif not is_live and is_currently_posted:
+                # --- (Code for DELETING message - UNCHANGED, but ensure it removes from live_messages dict) ---
                 logger.info(f"[{tier_name}] {streamer_login} went OFFLINE.")
                 message_id = current_live_mapping.get(streamer_login)
                 if not message_id:
-                     logger.warning(f"[{tier_name}] Tracked message ID missing for offline streamer {streamer_login}.")
-                     if streamer_login in live_messages:
-                         del live_messages[streamer_login]
-                         changes_made = True
+                     logger.warning(f"[{tier_name}] Tracked message ID missing for offline {streamer_login}.")
+                     if streamer_login in live_messages: del live_messages[streamer_login]; changes_made = True
                      continue
-
                 try:
-                    # Fetch message using the specific channel object
                     message = await channel.fetch_message(message_id)
                     await message.delete()
                     logger.info(f"[{tier_name}] Deleted notification for {streamer_login} (Message ID: {message_id})")
-                except discord.NotFound:
-                    logger.warning(f"[{tier_name}] Message {message_id} for {streamer_login} not found.")
-                except discord.Forbidden:
-                    logger.error(f"[{tier_name}] Bot lacks permissions (Manage Messages) to delete message {message_id} in channel {target_channel_id}.")
-                except discord.HTTPException as e:
-                    logger.error(f"[{tier_name}] HTTP error deleting message {message_id} for {streamer_login}: {e.status} {e.text}")
-                except Exception as e:
-                    logger.error(f"[{tier_name}] Error deleting message {message_id} for {streamer_login}: {e}", exc_info=True)
+                except discord.NotFound: logger.warning(f"[{tier_name}] Message {message_id} for {streamer_login} not found.")
+                except discord.Forbidden: logger.error(f"[{tier_name}] Bot lacks permissions (Manage Msgs) in {target_channel_id}.")
+                except discord.HTTPException as e: logger.error(f"[{tier_name}] HTTP error deleting msg {message_id}: {e.status} {e.text}")
+                except Exception as e: logger.error(f"[{tier_name}] Error deleting msg {message_id}: {e}", exc_info=True)
+                # Remove from live messages regardless of deletion success
+                if streamer_login in live_messages: del live_messages[streamer_login]; changes_made = True
+            # --- End Scenario 2 ---
 
-                if streamer_login in live_messages:
-                     del live_messages[streamer_login]
-                     changes_made = True
+            # --- Scenario 3: Streamer is still LIVE ---
+            elif is_live and is_currently_posted:
+                # Check if roughly 5 minutes have passed (using current minute)
+                if now.minute % 5 == 0: # Trigger update approx every 5 minutes
+                    logger.info(f"[{tier_name}] Updating embed for {streamer_login} (triggered on minute {now.minute}).")
+                    message_id = current_live_mapping.get(streamer_login)
+                    if not message_id:
+                         logger.warning(f"[{tier_name}] Tracked message ID missing for live update {streamer_login}.")
+                         if streamer_login in live_messages: del live_messages[streamer_login]; changes_made = True
+                         continue
+                    try:
+                        message = await channel.fetch_message(message_id)
+                        # Create a new embed with the latest info (title, game, viewers, thumbnail)
+                        # Use the 'status' variable fetched at the start of this loop iteration
+                        new_embed = discord.Embed(
+                            title=f"🔴 {streamer_login} is LIVE! ({tier_name.upper()})",
+                            url=f"https://twitch.tv/{streamer_login}",
+                            description=status.get('title', 'No Title Provided'),
+                            color=discord.Color.purple(),
+                            timestamp=message.created_at # Keep original post time or use now? Let's keep original.
+                        )
+                        new_embed.add_field(name="Game", value=status.get('game_name', 'N/A'), inline=True)
+                        new_embed.add_field(name="Viewers", value=f"{status.get('viewer_count', 'N/A'):,}", inline=True)
+                        if status.get('thumbnail_url'): new_embed.set_image(url=status['thumbnail_url'])
+                        else: new_embed.set_image(url=discord.Embed.Empty) # Clear image if not available
+                        new_embed.set_footer(text="Click the title to watch! (Updated)")
+
+                        await message.edit(embed=new_embed)
+                        logger.info(f"[{tier_name}] Successfully updated embed for {streamer_login} (Message ID: {message_id})")
+
+                    except discord.NotFound:
+                        logger.warning(f"[{tier_name}] Message {message_id} for {streamer_login} not found during update. Removing from tracker.")
+                        # Mark for deletion outside the except block to avoid modifying dict during iteration issues potentially
+                        message_id_to_delete_later = streamer_login
+                    except discord.Forbidden:
+                        logger.error(f"[{tier_name}] Bot lacks permissions (Embed Links?) to edit msg {message_id} in {target_channel_id}.")
+                        # Should we remove from tracker if we can't edit? Maybe not, try again later.
+                    except discord.HTTPException as e:
+                        logger.error(f"[{tier_name}] HTTP error editing msg {message_id} for {streamer_login}: {e.status} {e.text}")
+                    except Exception as e:
+                        logger.error(f"[{tier_name}] Error editing msg {message_id} for {streamer_login}: {e}", exc_info=True)
+            # --- End Scenario 3 ---
+
+            # --- Scenario 4: Streamer is still OFFLINE ---
+            # elif not is_live and not is_currently_posted:
+            #     pass # No action needed
 
         except Exception as e:
-            logger.error(f"[{tier_name}] Unexpected error in check loop for {streamer_login}: {e}", exc_info=True)
+            logger.error(f"[{tier_name}] Unexpected error in outer check loop for {streamer_login}: {e}", exc_info=True)
 
+        # Handle deletion marked earlier if message vanished during update attempt
+        if message_id_to_delete_later:
+            if message_id_to_delete_later in live_messages:
+                del live_messages[message_id_to_delete_later]
+                changes_made = True
+
+
+    # Save changes only once after processing all streamers for the tier
     if changes_made:
         save_data(live_messages_file, live_messages)
         logger.info(f"[{tier_name}] Live messages file ({live_messages_file}) updated.")
@@ -335,6 +384,30 @@ async def on_ready():
     logger.info(f'discord.py version: {discord.__version__}')
     logger.info('Bot is ready. Starting background check loop.')
     check_streams.start()
+
+# --- NEW: Global Error Handler ---
+@bot.event
+async def on_command_error(ctx, error):
+    """Handles errors globally, silences CheckFailure in guilds."""
+    # Check if the error is CheckFailure AND the command was used in a guild
+    if isinstance(error, commands.CheckFailure) and ctx.guild is not None:
+        # The globally_block_guilds check failed. Do nothing.
+        logger.debug(f"Silently ignoring CheckFailure for command '{ctx.command.name if ctx.command else 'Unknown'}' in guild {ctx.guild.id}")
+        return  # Prevents further error handling for this specific case
+
+    # --- Optional: Handle CommandNotFound silently globally ---
+    # Uncomment the following lines if you ALSO want to silence "Command not found" errors
+    # if isinstance(error, commands.CommandNotFound):
+    #     logger.debug(f"Command not found: {ctx.message.content}")
+    #     return # Silently ignore invalid commands
+
+    # If it's not a CheckFailure in a guild (or CommandNotFound if enabled above),
+    # let other error handlers (like the ones defined with @command.error)
+    # or the default library behavior handle it.
+    # We can log unhandled errors here for debugging.
+    if not hasattr(ctx.command, 'on_error'): # Log only if no specific error handler exists
+        logger.error(f'Unhandled command error in command {ctx.command if ctx.command else "Unknown"}: {error}', exc_info=error)
+    # else: The specific error handler defined for the command will handle it.
 
 # --- Custom Check for Allowed Users (is_allowed_user is UNCHANGED) ---
 def is_allowed_user():
