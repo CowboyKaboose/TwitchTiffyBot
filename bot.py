@@ -212,7 +212,7 @@ async def create_live_embed(status: Dict[str, Any], tier_name: str, current_time
             duration_str = format_timedelta(duration)
         except (ValueError, TypeError) as e: logger.warning(f"[{tier_name}] Error parsing started_at '{start_time_str}' for {streamer_login}: {e}"); duration_str = "Error"
 
-    embed = discord.Embed(title=f"{streamer_login} is LIVE! ({tier_name.upper()})", url=f"https://twitch.tv/{streamer_login}", description=status.get('title', 'No Title Provided'), color=discord.Color.purple(), timestamp=current_time)
+    embed = discord.Embed(title=f"{streamer_login} is LIVE! ", url=f"https://twitch.tv/{streamer_login}", description=status.get('title', 'No Title Provided'), color=discord.Color.purple(), timestamp=current_time)
     embed.add_field(name="Game", value=status.get('game_name', 'N/A'), inline=True)
     embed.add_field(name="Viewers", value=f"{status.get('viewer_count', 'N/A'):,}", inline=True)
     embed.add_field(name="Live For", value=duration_str, inline=True)
@@ -295,7 +295,7 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
                     try:
                         live_embed = await create_live_embed(status, tier_name, now)
                         if live_embed:
-                            message_text = f" {actual_login} ({tier_name}) is live!"
+                            message_text = f" Hey Chat, guess what {actual_login} is live!"
                             new_message = await channel.send(message_text, embed=live_embed)
                             live_messages[actual_login] = new_message.id # Update tracker with NEW ID
                             changes_made_to_tracker = True
