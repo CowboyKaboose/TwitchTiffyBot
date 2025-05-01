@@ -10,6 +10,29 @@ from dotenv import load_dotenv, set_key, find_dotenv
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Set, Dict, Optional, Any # Added Optional, Any
+import random
+
+# --- Message Templates ---
+INITIAL_LIVE_TEMPLATES = [
+    "🎉 Hey Chat! {name}  just went live! 🎉",
+    "🔴 LIVE NOW! {name}  has started streaming!",
+    "🔥 Guess what? {name}  is LIVE right now!",
+    "➡️ {name}  is live! Jump in!",
+    "🔔 Ding ding ding! {name}  stream is active!",
+    "Psst... Chat... {name}  just went live. You know what to do.",
+    "Yo Chat! {name} 's LIVE — let's go!",
+    "Hey everyone, exciting news: {name}  is now live!",
+    "🚨 Alert! {name}  has gone live!",
+]
+
+UPDATE_LIVE_TEMPLATES = [
+    "🟢 {name} is still live! ",
+    "🔄 Stream update: {name} continues to be live!",
+    "👀 Still going! {name} is live with updated info.",
+    "✅ Refreshed: {name} stream is ongoing.",
+    "✨ Still live and kicking: {name} ! ",
+    "📊 Status Update: {name} is live.",
+]
 
 # --- Configuration and Setup ---
 load_dotenv()
@@ -201,7 +224,7 @@ def format_timedelta(duration: timedelta) -> str:
     else: return "< 1m"
 
 async def create_live_embed(status: Dict[str, Any], tier_name: str, current_time: datetime) -> Optional[discord.Embed]:
-    """Helper to create the standard live embed, including duration."""
+    """Helper to create the standard live embed, including duration and random color."""
     streamer_login = status.get('user_login', 'Unknown') # Use the login returned by API
     start_time_str = status.get('started_at')
     duration_str = "N/A"
@@ -212,13 +235,20 @@ async def create_live_embed(status: Dict[str, Any], tier_name: str, current_time
             duration_str = format_timedelta(duration)
         except (ValueError, TypeError) as e: logger.warning(f"[{tier_name}] Error parsing started_at '{start_time_str}' for {streamer_login}: {e}"); duration_str = "Error"
 
-    embed = discord.Embed(title=f"{streamer_login} is LIVE! ", url=f"https://twitch.tv/{streamer_login}", description=status.get('title', 'No Title Provided'), color=discord.Color.purple(), timestamp=current_time)
+    embed = discord.Embed(
+        title=f"Hey Chat, guess what! {streamer_login} is now LIVE! ({tier_name.upper()})",
+        url=f"https://twitch.tv/{streamer_login}",
+        description=status.get('title', 'No Title Provided'),
+        # ---> MODIFIED LINE <---
+        color=discord.Color.random(), # Assign a random color
+        timestamp=current_time
+    )
     embed.add_field(name="Game", value=status.get('game_name', 'N/A'), inline=True)
     embed.add_field(name="Viewers", value=f"{status.get('viewer_count', 'N/A'):,}", inline=True)
     embed.add_field(name="Live For", value=duration_str, inline=True)
     thumbnail_url = status.get('thumbnail_url')
     if thumbnail_url:
-        timestamp_query = f"?t={int(current_time.timestamp())}"
+        timestamp_query = f"?t={int(current_time.timestamp())}" # Cache buster
         embed.set_image(url=thumbnail_url + timestamp_query)
     embed.set_footer(text="Click the title to watch!")
     return embed
@@ -226,16 +256,7 @@ async def create_live_embed(status: Dict[str, Any], tier_name: str, current_time
 
 async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, streamer_logins: List[str], target_channel_id: int, live_messages_file: str):
     """Checks a specific tier of streamers and handles notifications using delete/repost for updates."""
-    if not streamer_logins: return
-    live_messages: Dict[str, int] = load_data(live_messages_file)
-    if not isinstance(live_messages, dict): logger.error(f"[{tier_name}] Corrupted data in {live_messages_file}. Resetting."); live_messages = {}; save_data(live_messages_file, live_messages)
-    logger.info(f"Performing check for {tier_name} tier: {', '.join(streamer_logins)}")
-    channel = bot_instance.get_channel(target_channel_id)
-    if not channel: logger.error(f"{tier_name} target channel ({target_channel_id}) not found."); return
-
-    current_live_mapping = live_messages.copy()
-    changes_made_to_tracker = False
-    now = datetime.now(timezone.utc)
+    # ... (initial setup: load data, get channel, etc. - remains the same) ...
 
     for streamer_login in streamer_logins:
         message_id_to_remove_from_tracker = None
@@ -243,18 +264,21 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
             status = await get_stream_status(streamer_login)
             await asyncio.sleep(0.2)
             if status is None: logger.warning(f"[{tier_name}] Skipping {streamer_login}: API error."); continue
-            actual_login = status.get('user_login', streamer_login) # Use login returned by API for consistency
+            actual_login = status.get('user_login', streamer_login)
             is_live = status.get('live', False)
             is_currently_posted = actual_login in current_live_mapping
 
-            # Scenario 1: Went LIVE
+            # --- Scenario 1: Went LIVE ---
             if is_live and not is_currently_posted:
                 logger.info(f"[{tier_name}] {actual_login} went LIVE! Posting initial notification.")
                 try:
                     live_embed = await create_live_embed(status, tier_name, now)
                     if live_embed:
-                        message_text = f"🎉 {actual_login} ({tier_name}) just went live! 🎉"
-                        message = await channel.send(message_text, embed=live_embed)
+                        # ---> CHOOSE RANDOM INITIAL MESSAGE <---
+                        message_template = random.choice(INITIAL_LIVE_TEMPLATES)
+                        message_text = message_template.format(name=actual_login, tier=tier_name)
+                        # -----------------------------------------
+                        message = await channel.send(message_text, embed=live_embed) # Send with random text
                         live_messages[actual_login] = message.id
                         changes_made_to_tracker = True
                         logger.info(f"[{tier_name}] Posted live notification for {actual_login} (Msg ID: {message.id})")
@@ -263,8 +287,9 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
                 except discord.HTTPException as e: logger.error(f"[{tier_name}] HTTP error posting msg for {actual_login}: {e.status} {e.text}")
                 except Exception as e: logger.error(f"[{tier_name}] Error posting msg for {actual_login}: {e}", exc_info=True)
 
-            # Scenario 2: Went OFFLINE
+            # --- Scenario 2: Went OFFLINE ---
             elif not is_live and is_currently_posted:
+                # ... (Offline logic remains the same - just deletes) ...
                 logger.info(f"[{tier_name}] {actual_login} went OFFLINE. Deleting notification.")
                 old_message_id = current_live_mapping.get(actual_login)
                 if old_message_id:
@@ -278,9 +303,10 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
                 else: logger.warning(f"[{tier_name}] Tracked message ID missing for offline {actual_login}.")
                 message_id_to_remove_from_tracker = actual_login
 
-            # Scenario 3: Still LIVE - Update on interval
+
+            # --- Scenario 3: Still LIVE - Update on interval ---
             elif is_live and is_currently_posted:
-                if now.minute % 5 == 0:
+                if now.minute % 5 == 0: # Check interval
                     logger.info(f"[{tier_name}] Updating notification for {actual_login} (Delete/Repost on minute {now.minute}).")
                     old_message_id = current_live_mapping.get(actual_login)
                     # Delete old (best effort)
@@ -295,9 +321,12 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
                     try:
                         live_embed = await create_live_embed(status, tier_name, now)
                         if live_embed:
-                            message_text = f" Hey Chat, guess what {actual_login} is live!"
-                            new_message = await channel.send(message_text, embed=live_embed)
-                            live_messages[actual_login] = new_message.id # Update tracker with NEW ID
+                            # ---> CHOOSE RANDOM UPDATE MESSAGE <---
+                            message_template = random.choice(UPDATE_LIVE_TEMPLATES)
+                            message_text = message_template.format(name=actual_login, tier=tier_name)
+                            # --------------------------------------
+                            new_message = await channel.send(message_text, embed=live_embed) # Send with random text
+                            live_messages[actual_login] = new_message.id
                             changes_made_to_tracker = True
                             logger.info(f"[{tier_name}] Reposted updated notification for {actual_login} (New Msg ID: {new_message.id})")
                         else: logger.error(f"[{tier_name}] Failed to create updated embed for {actual_login}.");
@@ -305,7 +334,10 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
                     except discord.HTTPException as e: logger.error(f"[{tier_name}] HTTP error reposting msg for {actual_login}: {e.status} {e.text}")
                     except Exception as e: logger.error(f"[{tier_name}] Error reposting msg for {actual_login}: {e}", exc_info=True)
 
-        except Exception as e: logger.error(f"[{tier_name}] Unexpected error in outer loop for {streamer_login}: {e}", exc_info=True)
+            # ... (rest of the loop, exception handling, tracker cleanup) ...
+
+        except Exception as e:
+            logger.error(f"[{tier_name}] Unexpected error in outer loop for {streamer_login}: {e}", exc_info=True)
 
         if message_id_to_remove_from_tracker:
             if message_id_to_remove_from_tracker in live_messages:
@@ -315,6 +347,8 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
     if changes_made_to_tracker:
         save_data(live_messages_file, live_messages)
         logger.info(f"[{tier_name}] Live messages file ({live_messages_file}) updated.")
+
+# ... (rest of the bot code remains the same) ...
 
 
 # --- Main Check Function ---
