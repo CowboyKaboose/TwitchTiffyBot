@@ -261,54 +261,63 @@ import discord.ui # Usually near 'import discord'
 # ... inside check_and_notify_tier function ...
 
 async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, streamer_logins: List[str], target_channel_id: int, live_messages_file: str):
-    # ... (initial setup and loop start) ...
+    """Checks a specific tier of streamers and handles notifications using delete/repost for updates."""
+    if not streamer_logins: return
+
+    live_messages: Dict[str, int] = load_data(live_messages_file)
+    if not isinstance(live_messages, dict):
+        logger.error(f"[{tier_name}] Corrupted data in {live_messages_file}. Resetting.");
+        live_messages = {}; save_data(live_messages_file, live_messages)
+
+    logger.info(f"Performing check for {tier_name} tier: {', '.join(streamer_logins)}")
+    channel = bot_instance.get_channel(target_channel_id)
+    if not channel:
+        logger.error(f"{tier_name} target channel ({target_channel_id}) not found."); return
+
+    current_live_mapping = live_messages.copy()
+    # --- ENSURE variable is initialized HERE ---
+    changes_made_to_tracker = False
+    # ------------------------------------------
+    now = datetime.now(timezone.utc)
 
     for streamer_login in streamer_logins:
         message_id_to_remove_from_tracker = None
         try:
-            # ... (get status, check if live/posted) ...
-            actual_login = status.get('user_login', streamer_login)
-            is_live = status.get('live', False)
+            # --- FIX 1: Rename 'status' variable inside the loop ---
+            api_status = await get_stream_status(streamer_login)
+            # -------------------------------------------------------
+            await asyncio.sleep(0.2)
+
+            # --- Use the new variable name 'api_status' ---
+            if api_status is None: logger.warning(f"[{tier_name}] Skipping {streamer_login}: API error."); continue
+
+            actual_login = api_status.get('user_login', streamer_login) # Use new name
+            is_live = api_status.get('live', False) # Use new name
+            # -----------------------------------------------
             is_currently_posted = actual_login in current_live_mapping
 
-            # --- Scenario 1: Went LIVE ---
+            # Scenario 1: Went LIVE
             if is_live and not is_currently_posted:
                 logger.info(f"[{tier_name}] {actual_login} went LIVE! Posting initial notification.")
                 try:
-                    live_embed = await create_live_embed(status, tier_name, now)
+                    # --- Pass 'api_status' to embed creator ---
+                    live_embed = await create_live_embed(api_status, tier_name, now)
+                    # -----------------------------------------
                     if live_embed:
                         message_template = random.choice(INITIAL_LIVE_TEMPLATES)
                         message_text = message_template.format(name=actual_login, tier=tier_name)
-
-                        # --- CREATE THE BUTTON VIEW ---
-                        twitch_url = f"https://twitch.tv/{actual_login}"
-                        view = discord.ui.View()
-                        # Add a link button
-                        view.add_item(discord.ui.Button(
-                            label="Watch on Twitch!",
-                            style=discord.ButtonStyle.link,
-                            url=twitch_url,
-                            emoji="<:twitch:123456789012345678>" # Optional: Replace with actual Twitch emoji ID if your bot has access
-                            # or use a standard emoji like "📺" or "▶️"
-                        ))
-                        # -----------------------------
-
-                        # ---> Send message WITH the view (contains the button) <---
+                        view = discord.ui.View().add_item(discord.ui.Button(label="Watch on Twitch!", style=discord.ButtonStyle.link, url=f"https://twitch.tv/{actual_login}", emoji="📺"))
                         message = await channel.send(message_text, embed=live_embed, view=view)
-
                         live_messages[actual_login] = message.id
                         changes_made_to_tracker = True
                         logger.info(f"[{tier_name}] Posted live notification for {actual_login} (Msg ID: {message.id})")
                     else: logger.error(f"[{tier_name}] Failed to create embed for {actual_login}")
-                # ... (exception handling) ...
-                except discord.Forbidden: logger.error(f"[{tier_name}] Bot lacks permissions (Send/Embed/AddReactions?) in {target_channel_id}.") # Buttons might need reaction perms? Check docs.
+                except discord.Forbidden: logger.error(f"[{tier_name}] Bot lacks permissions (Send/Embed/UI?) in {target_channel_id}.")
                 except discord.HTTPException as e: logger.error(f"[{tier_name}] HTTP error posting msg for {actual_login}: {e.status} {e.text}")
                 except Exception as e: logger.error(f"[{tier_name}] Error posting msg for {actual_login}: {e}", exc_info=True)
 
-
-            # --- Scenario 2: Went OFFLINE ---
+            # Scenario 2: Went OFFLINE
             elif not is_live and is_currently_posted:
-                # ... (Offline logic remains the same - just deletes the message, button disappears with it) ...
                 logger.info(f"[{tier_name}] {actual_login} went OFFLINE. Deleting notification.")
                 old_message_id = current_live_mapping.get(actual_login)
                 if old_message_id:
@@ -320,9 +329,9 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
                 else: logger.warning(f"[{tier_name}] Tracked message ID missing for offline {actual_login}.")
                 message_id_to_remove_from_tracker = actual_login
 
-            # --- Scenario 3: Still LIVE - Update on interval (DELETE/REPOST) ---
+            # Scenario 3: Still LIVE - Update on interval
             elif is_live and is_currently_posted:
-                if now.minute % 5 == 0: # Check interval
+                if now.minute % 5 == 0:
                     logger.info(f"[{tier_name}] Updating notification for {actual_login} (Delete/Repost on minute {now.minute}).")
                     old_message_id = current_live_mapping.get(actual_login)
                     # Delete old
@@ -334,45 +343,34 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
                     else: logger.warning(f"[{tier_name}] Msg ID missing for update of {actual_login}. Will post new.")
                     # Post new
                     try:
-                        live_embed = await create_live_embed(status, tier_name, now)
+                        # --- Pass 'api_status' to embed creator ---
+                        live_embed = await create_live_embed(api_status, tier_name, now)
+                        # -----------------------------------------
                         if live_embed:
                             message_template = random.choice(UPDATE_LIVE_TEMPLATES)
                             message_text = message_template.format(name=actual_login, tier=tier_name)
-
-                            # --- CREATE THE BUTTON VIEW (AGAIN for repost) ---
-                            twitch_url = f"https://twitch.tv/{actual_login}"
-                            view = discord.ui.View()
-                            view.add_item(discord.ui.Button(
-                                label="Watch on Twitch!",
-                                style=discord.ButtonStyle.link,
-                                url=twitch_url,
-                                emoji="📺" # Using a standard emoji this time
-                            ))
-                            # ----------------------------------------------
-
-                            # ---> Send REPOST WITH the view <---
+                            view = discord.ui.View().add_item(discord.ui.Button(label="Watch on Twitch!", style=discord.ButtonStyle.link, url=f"https://twitch.tv/{actual_login}", emoji="📺"))
                             new_message = await channel.send(message_text, embed=live_embed, view=view)
-
-                            live_messages[actual_login] = new_message.id # Update tracker
+                            live_messages[actual_login] = new_message.id
                             changes_made_to_tracker = True
                             logger.info(f"[{tier_name}] Reposted updated notification for {actual_login} (New Msg ID: {new_message.id})")
                         else: logger.error(f"[{tier_name}] Failed to create updated embed for {actual_login}.");
-                    # ... (exception handling for repost) ...
                     except discord.Forbidden: logger.error(f"[{tier_name}] Cannot repost message for {actual_login} (Forbidden).")
                     except discord.HTTPException as e: logger.error(f"[{tier_name}] HTTP error reposting msg for {actual_login}: {e.status} {e.text}")
                     except Exception as e: logger.error(f"[{tier_name}] Error reposting msg for {actual_login}: {e}", exc_info=True)
 
-
-            # ... (rest of the loop) ...
-
+        # --- Outer exception handler - uses 'streamer_login' (original input) ---
         except Exception as e:
              logger.error(f"[{tier_name}] Unexpected error in outer loop for {streamer_login}: {e}", exc_info=True)
+        # -------------------------------------------------------------------------
 
+        # Clean up tracker if marked for removal
         if message_id_to_remove_from_tracker:
             if message_id_to_remove_from_tracker in live_messages:
                 del live_messages[message_id_to_remove_from_tracker]
                 changes_made_to_tracker = True
 
+    # Check the flag AFTER the loop is fully completed
     if changes_made_to_tracker:
         save_data(live_messages_file, live_messages)
         logger.info(f"[{tier_name}] Live messages file ({live_messages_file}) updated.")
