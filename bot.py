@@ -15,24 +15,24 @@ import random
 
 # --- Message Templates ---
 INITIAL_LIVE_TEMPLATES = [
-    "🎉 Hey Chat! {name}  just went live! 🎉",
-    "🔴 LIVE NOW! {name}  has started streaming!",
-    "🔥 Guess what? {name}  is LIVE right now!",
-    "➡️ {name}  is live! Jump in!",
-    "🔔 Ding ding ding! {name}  stream is active!",
-    "Psst... Chat... {name}  just went live. You know what to do.",
-    "Yo Chat! {name} 's LIVE — let's go!",
-    "Hey everyone, exciting news: {name}  is now live!",
-    "🚨 Alert! {name}  has gone live!",
+    "🎉 Hey Chat! ** {name} **  just went live! 🎉",
+    "🔴 LIVE NOW! ** {name} **  has started streaming!",
+    "🔥 Guess what? ** {name} **  is LIVE right now!",
+    "➡️ ** {name} **  is live! Jump in!",
+    "🔔 Ding ding ding! ** {name} **  stream is active!",
+    "Psst... Chat... ** {name} **  just went live. You know what to do.",
+    "Yo Chat! ** {name} ** 's LIVE — let's go!",
+    "Hey everyone, exciting news: ** {name} **  is now live!",
+    "🚨 Alert! ** {name} **  has gone live!",
 ]
 
 UPDATE_LIVE_TEMPLATES = [
-    "🟢 {name} is still live! ",
-    "🔄 Stream update: {name} continues to be live!",
-    "👀 Still going! {name} is live with updated info.",
-    "✅ Refreshed: {name} stream is ongoing.",
-    "✨ Still live and kicking: {name} ! ",
-    "📊 Status Update: {name} is live.",
+    "🟢 ** {name} ** is still live! ",
+    "🔄 Stream update: ** {name} ** continues to be live!",
+    "👀 Still going! ** {name} ** is live with updated info.",
+    "✅ Refreshed: ** {name} ** stream is ongoing.",
+    "✨ Still live and kicking: ** {name} ** ! ",
+    "📊 Status Update: ** {name} ** is live.",
 ]
 
 # --- Configuration and Setup ---
