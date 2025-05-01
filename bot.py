@@ -339,21 +339,46 @@ async def on_ready():
     logger.info('Bot is ready. Starting background check loop.')
     check_streams.start()
 
+# --- Global Error Handler ---
 @bot.event
 async def on_command_error(ctx, error):
     """Handles errors globally, silences CheckFailure in guilds."""
+
+    # --- PRIORITY 1: Silence CheckFailures caused by the global guild block ---
+    # This check MUST come first.
+    # isinstance(error, commands.CheckFailure) -> Checks if any check failed.
+    # ctx.guild is not None -> Checks if the command was used in a server channel.
     if isinstance(error, commands.CheckFailure) and ctx.guild is not None:
-        logger.debug(f"Silently ignoring CheckFailure for '{ctx.command.name if ctx.command else 'Unknown'}' in guild {ctx.guild.id}")
+        # Log that we are intentionally ignoring it.
+        logger.debug(f"Silently ignoring CheckFailure for command '{ctx.command.name if ctx.command else 'Unknown'}' in guild {ctx.guild.id}. Originating error: {error}")
+        # Stop any further error handling for this specific case.
         return
-    if isinstance(error, commands.CommandNotFound):
-        logger.debug(f"Command not found: {ctx.message.content}")
-        return
-    if not hasattr(ctx.command, 'on_error'):
-        logger.error(f'Unhandled error in {ctx.command if ctx.command else "Unknown"}: {error}', exc_info=error)
+
+    # --- PRIORITY 2: Handle CommandNotFound globally (Optional) ---
+    # Uncomment if you want to silence "command not found" errors everywhere.
+    # if isinstance(error, commands.CommandNotFound):
+    #     logger.debug(f"Command not found: {ctx.message.content}")
+    #     return # Silently ignore invalid commands
+
+    # --- PRIORITY 3: Let specific command error handlers run if they exist ---
+    # If the command *has* its own error handler (@command.error), let it take over.
+    # The CheckFailure from is_allowed_user in DMs WILL be caught by these if defined.
+    if hasattr(ctx.command, 'on_error'):
+        # The specific error handler will be called by the library automatically.
+        # We don't need to do anything here.
+        # logger.debug(f"Passing error to specific handler for command '{ctx.command.name}': {error}")
+        pass # Let the specific handler run
+    else:
+        # --- PRIORITY 4: Default handling for unhandled errors ---
+        # Log errors that didn't get caught by a specific handler and weren't silenced above.
+        logger.error(f'Unhandled command error in command {ctx.command if ctx.command else "Unknown"}: {error}', exc_info=error)
         try:
-            if ctx.guild is None: # Only reply in DMs for unhandled errors
-                 await ctx.send("❌ An unexpected error occurred.")
-        except Exception as e: logger.error(f"Failed to send generic error message: {e}")
+            # Send a generic error message ONLY in DMs for unhandled errors.
+            if ctx.guild is None: # Only reply in DMs
+                 await ctx.send("❌ An unexpected error occurred. Please check the logs or contact the administrator.")
+        except Exception as e:
+            # Log failure to send the error message itself
+            logger.error(f"Failed to send generic error message to user in DM: {e}")
 
 
 # --- Custom Check for Allowed Users ---
