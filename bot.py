@@ -14,7 +14,6 @@ from typing import List, Set, Dict, Optional, Any
 import random
 
 # --- Message Templates ---
-# Templates for the initial "go-live" notification. {name} is replaced with the streamer's name.
 INITIAL_LIVE_TEMPLATES = [
     "🎉 Hey Chat! **{name}** just went live! 🎉",
     "🔴 LIVE NOW! **{name}** has started streaming!",
@@ -27,7 +26,6 @@ INITIAL_LIVE_TEMPLATES = [
     "🚨 Alert! **{name}** has gone live!",
 ]
 
-# Templates for the 5-minute update reposts.
 UPDATE_LIVE_TEMPLATES = [
     "🟢 **{name}** is still live!",
     "🔄 Stream update: **{name}** continues to be live!",
@@ -126,7 +124,6 @@ bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 # --- Global Check for DMs Only ---
 @bot.check
 async def globally_block_guilds(ctx):
-    """Prevents commands from running in server channels (Guilds)."""
     is_dm = ctx.guild is None
     if not is_dm:
         logger.debug(f"Command '{ctx.command.name if ctx.command else 'Unknown'}' ignored in guild {ctx.guild.id} by {ctx.author}")
@@ -147,7 +144,9 @@ async def send_tips_ping_message(bot_instance: commands.Bot):
     role = channel.guild.get_role(TIPS_ROLE_ID)
     if not role: logger.error(f"Tips ping failed: Role {TIPS_ROLE_ID} not found."); return False, f"Role ID `{TIPS_ROLE_ID}` not found."
     try:
-        await channel.send(f"Hey {role.mention}, time to get your football tips in! 🏉")
+        # --- Corrected Emoji ---
+        message = f"Hey {role.mention}, time to get your football tips in! 🏉"
+        await channel.send(message)
         logger.info(f"Successfully sent tips ping to channel {TIPS_CHANNEL_ID}.")
         return True, f"Ping sent to {channel.mention}!"
     except discord.Forbidden: logger.error(f"Could not send tips ping to {TIPS_CHANNEL_ID} (Forbidden)."); return False, "Bot lacks permission."
@@ -221,7 +220,6 @@ async def create_live_embed(status: Dict[str, Any], tier_name: str, current_time
             start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
             duration = current_time - start_time; duration_str = format_timedelta(duration)
         except (ValueError, TypeError) as e: logger.warning(f"[{tier_name}] Error parsing started_at '{start_time_str}' for {streamer_login}: {e}")
-    # --- CORRECTED: Tier name is removed from the public-facing title. ---
     embed = discord.Embed(
         title=f"🔴 {streamer_login} is LIVE!",
         url=f"https://twitch.tv/{streamer_login}",
@@ -233,7 +231,7 @@ async def create_live_embed(status: Dict[str, Any], tier_name: str, current_time
     embed.add_field(name="Viewers", value=f"{status.get('viewer_count', 'N/A'):,}", inline=True)
     embed.add_field(name="Live For", value=duration_str, inline=True)
     thumbnail_url = status.get('thumbnail_url')
-    if thumbnail_url: embed.set_image(url=thumbnail_url + f"?t={int(current_time.timestamp())}") # Cache buster
+    if thumbnail_url: embed.set_image(url=thumbnail_url + f"?t={int(current_time.timestamp())}")
     embed.set_footer(text="Click the title to watch!")
     return embed
 
@@ -261,7 +259,7 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
                     live_embed = await create_live_embed(api_status, tier_name, now)
                     if live_embed:
                         message_template = random.choice(INITIAL_LIVE_TEMPLATES)
-                        message_text = message_template.format(name=actual_login) # Tier name removed from format
+                        message_text = message_template.format(name=actual_login)
                         view = discord.ui.View().add_item(discord.ui.Button(label="Watch on Twitch!", style=discord.ButtonStyle.link, url=f"https://twitch.tv/{actual_login}", emoji="📺"))
                         message = await channel.send(message_text, embed=live_embed, view=view)
                         live_messages[actual_login] = message.id; changes_made_to_tracker = True
@@ -288,7 +286,7 @@ async def check_and_notify_tier(bot_instance: commands.Bot, tier_name: str, stre
                         live_embed = await create_live_embed(api_status, tier_name, now)
                         if live_embed:
                             message_template = random.choice(UPDATE_LIVE_TEMPLATES)
-                            message_text = message_template.format(name=actual_login) # Tier name removed from format
+                            message_text = message_template.format(name=actual_login)
                             view = discord.ui.View().add_item(discord.ui.Button(label="Watch on Twitch!", style=discord.ButtonStyle.link, url=f"https://twitch.tv/{actual_login}", emoji="📺"))
                             new_message = await channel.send(message_text, embed=live_embed, view=view)
                             live_messages[actual_login] = new_message.id; changes_made_to_tracker = True
@@ -343,263 +341,461 @@ def is_allowed_user():
         return is_allowed
     return commands.check(predicate)
 
-# --- Bot Commands (ordered correctly) ---
+# --- Bot Commands (ordered correctly, readable format) ---
 @bot.command(name='testping', help='Manually sends the weekly tips ping.')
 @is_allowed_user()
 async def test_ping(ctx):
     await ctx.send("⏳ Attempting to send a test ping...")
     success, response_message = await send_tips_ping_message(ctx.bot)
-    if success: await ctx.send(f"✅ Success! Bot reported: \"{response_message}\"")
-    else: await ctx.send(f"❌ Failed! Bot reported: \"{response_message}\"")
+    if success:
+        await ctx.send(f"✅ Success! Bot reported: \"{response_message}\"")
+    else:
+        await ctx.send(f"❌ Failed! Bot reported: \"{response_message}\"")
+
 @test_ping.error
 async def test_ping_error(ctx, error):
-    if isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in testping command: {error}", exc_info=True); await ctx.send("❌ Error.")
-# VIP Commands
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in testping command: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
+# --- VIP Streamer Commands ---
 @bot.command(name='addvipstreamer', help='Adds a VIP Twitch streamer.')
 @is_allowed_user()
 async def add_vip_streamer(ctx, twitch_username: str):
-    streamer_login = twitch_username.lower().strip(); streamers = load_data(VIP_STREAMERS_FILE)
-    if not streamer_login: await ctx.send("⚠️ Invalid username."); return
-    if streamer_login in streamers: await ctx.send(f"`{streamer_login}` already on VIP list."); return
-    streamers.append(streamer_login); save_data(VIP_STREAMERS_FILE, streamers)
-    await ctx.send(f"✅ Added `{streamer_login}` to VIP watchlist."); logger.info(f"User {ctx.author} added VIP: {streamer_login}")
+    streamer_login = twitch_username.lower().strip()
+    streamers = load_data(VIP_STREAMERS_FILE)
+    if not streamer_login:
+        await ctx.send("⚠️ Invalid username.")
+        return
+    if streamer_login in streamers:
+        await ctx.send(f"`{streamer_login}` already on VIP list.")
+        return
+    streamers.append(streamer_login)
+    save_data(VIP_STREAMERS_FILE, streamers)
+    await ctx.send(f"✅ Added `{streamer_login}` to VIP watchlist.")
+    logger.info(f"User {ctx.author} added VIP: {streamer_login}")
+
 @add_vip_streamer.error
 async def add_vip_streamer_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument): await ctx.send("Usage: `!addvipstreamer <username>`")
-    elif isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in addvipstreamer: {error}", exc_info=True); await ctx.send("❌ Error.")
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Usage: `!addvipstreamer <username>`")
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in addvipstreamer: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
 @bot.command(name='removevipstreamer', help='Removes a VIP streamer.')
 @is_allowed_user()
 async def remove_vip_streamer(ctx, twitch_username: str):
     streamer_login = twitch_username.lower().strip()
-    if not streamer_login: await ctx.send("⚠️ Invalid username."); return
-    streamers = load_data(VIP_STREAMERS_FILE); live_messages = load_data(LIVE_MESSAGES_VIP_FILE); changes_made_live = False
+    if not streamer_login:
+        await ctx.send("⚠️ Invalid username.")
+        return
+    streamers = load_data(VIP_STREAMERS_FILE)
+    live_messages = load_data(LIVE_MESSAGES_VIP_FILE)
+    changes_made_live = False
     if streamer_login in streamers:
-        streamers.remove(streamer_login); save_data(VIP_STREAMERS_FILE, streamers)
-        channel = bot.get_channel(VIP_CHANNEL_ID); message_id = live_messages.pop(streamer_login, None)
+        streamers.remove(streamer_login)
+        save_data(VIP_STREAMERS_FILE, streamers)
+        channel = bot.get_channel(VIP_CHANNEL_ID)
+        message_id = live_messages.pop(streamer_login, None)
         if message_id and channel:
             changes_made_live = True
-            try: msg = await channel.fetch_message(message_id); await msg.delete(); logger.info(f"[VIP] Deleted msg {message_id}")
-            except Exception as e: logger.warning(f"[VIP] Could not delete msg {message_id}: {e}")
-        if changes_made_live: save_data(LIVE_MESSAGES_VIP_FILE, live_messages)
-        await ctx.send(f"🗑️ Removed `{streamer_login}` from VIP watchlist."); logger.info(f"User {ctx.author} removed VIP: {streamer_login}")
-    else: await ctx.send(f"`{streamer_login}` not found on VIP list.")
+            try:
+                msg = await channel.fetch_message(message_id)
+                await msg.delete()
+                logger.info(f"[VIP] Deleted msg {message_id}")
+            except Exception as e:
+                logger.warning(f"[VIP] Could not delete msg {message_id}: {e}")
+        if changes_made_live:
+            save_data(LIVE_MESSAGES_VIP_FILE, live_messages)
+        await ctx.send(f"🗑️ Removed `{streamer_login}` from VIP watchlist.")
+        logger.info(f"User {ctx.author} removed VIP: {streamer_login}")
+    else:
+        await ctx.send(f"`{streamer_login}` not found on VIP list.")
+
 @remove_vip_streamer.error
 async def remove_vip_streamer_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument): await ctx.send("Usage: `!removevipstreamer <username>`")
-    elif isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in removevipstreamer: {error}", exc_info=True); await ctx.send("❌ Error.")
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Usage: `!removevipstreamer <username>`")
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in removevipstreamer: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
 @bot.command(name='listvipstreamers', help='Lists watched VIP streamers.')
 @is_allowed_user()
 async def list_vip_streamers(ctx):
     streamers = load_data(VIP_STREAMERS_FILE)
-    if not streamers: await ctx.send("VIP watchlist is empty.")
-    else: await ctx.send(embed=discord.Embed(title="👑 VIP Watchlist", description="\n".join([f"- `{s}`" for s in sorted(streamers)]), color=discord.Color.gold()))
+    if not streamers:
+        await ctx.send("VIP watchlist is empty.")
+    else:
+        embed = discord.Embed(title="👑 VIP Watchlist", description="\n".join([f"- `{s}`" for s in sorted(streamers)]), color=discord.Color.gold())
+        await ctx.send(embed=embed)
+
 @list_vip_streamers.error
 async def list_vip_streamers_error(ctx, error):
-    if isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in listvipstreamers: {error}", exc_info=True); await ctx.send("❌ Error.")
-# Mod Commands
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in listvipstreamers: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
+# --- Mod Streamer Commands ---
 @bot.command(name='addmodstreamer', help='Adds a Mod Twitch streamer.')
 @is_allowed_user()
 async def add_mod_streamer(ctx, twitch_username: str):
-    streamer_login = twitch_username.lower().strip(); streamers = load_data(MOD_STREAMERS_FILE)
-    if not streamer_login: await ctx.send("⚠️ Invalid username."); return
-    if streamer_login in streamers: await ctx.send(f"`{streamer_login}` already on Mod list."); return
-    streamers.append(streamer_login); save_data(MOD_STREAMERS_FILE, streamers)
-    await ctx.send(f"✅ Added `{streamer_login}` to Mod watchlist."); logger.info(f"User {ctx.author} added Mod: {streamer_login}")
+    streamer_login = twitch_username.lower().strip()
+    streamers = load_data(MOD_STREAMERS_FILE)
+    if not streamer_login:
+        await ctx.send("⚠️ Invalid username.")
+        return
+    if streamer_login in streamers:
+        await ctx.send(f"`{streamer_login}` already on Mod list.")
+        return
+    streamers.append(streamer_login)
+    save_data(MOD_STREAMERS_FILE, streamers)
+    await ctx.send(f"✅ Added `{streamer_login}` to Mod watchlist.")
+    logger.info(f"User {ctx.author} added Mod: {streamer_login}")
+
 @add_mod_streamer.error
 async def add_mod_streamer_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument): await ctx.send("Usage: `!addmodstreamer <username>`")
-    elif isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in addmodstreamer: {error}", exc_info=True); await ctx.send("❌ Error.")
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Usage: `!addmodstreamer <username>`")
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in addmodstreamer: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
 @bot.command(name='removemodstreamer', help='Removes a Mod streamer.')
 @is_allowed_user()
 async def remove_mod_streamer(ctx, twitch_username: str):
     streamer_login = twitch_username.lower().strip()
-    if not streamer_login: await ctx.send("⚠️ Invalid username."); return
-    streamers = load_data(MOD_STREAMERS_FILE); live_messages = load_data(LIVE_MESSAGES_MOD_FILE); changes_made_live = False
+    if not streamer_login:
+        await ctx.send("⚠️ Invalid username.")
+        return
+    streamers = load_data(MOD_STREAMERS_FILE)
+    live_messages = load_data(LIVE_MESSAGES_MOD_FILE)
+    changes_made_live = False
     if streamer_login in streamers:
-        streamers.remove(streamer_login); save_data(MOD_STREAMERS_FILE, streamers)
-        channel = bot.get_channel(MOD_CHANNEL_ID); message_id = live_messages.pop(streamer_login, None)
+        streamers.remove(streamer_login)
+        save_data(MOD_STREAMERS_FILE, streamers)
+        channel = bot.get_channel(MOD_CHANNEL_ID)
+        message_id = live_messages.pop(streamer_login, None)
         if message_id and channel:
             changes_made_live = True
-            try: msg = await channel.fetch_message(message_id); await msg.delete(); logger.info(f"[Mod] Deleted msg {message_id}")
-            except Exception as e: logger.warning(f"[Mod] Could not delete msg {message_id}: {e}")
-        if changes_made_live: save_data(LIVE_MESSAGES_MOD_FILE, live_messages)
-        await ctx.send(f"🗑️ Removed `{streamer_login}` from Mod watchlist."); logger.info(f"User {ctx.author} removed Mod: {streamer_login}")
-    else: await ctx.send(f"`{streamer_login}` not found on Mod list.")
+            try:
+                msg = await channel.fetch_message(message_id)
+                await msg.delete()
+                logger.info(f"[Mod] Deleted msg {message_id}")
+            except Exception as e:
+                logger.warning(f"[Mod] Could not delete msg {message_id}: {e}")
+        if changes_made_live:
+            save_data(LIVE_MESSAGES_MOD_FILE, live_messages)
+        await ctx.send(f"🗑️ Removed `{streamer_login}` from Mod watchlist.")
+        logger.info(f"User {ctx.author} removed Mod: {streamer_login}")
+    else:
+        await ctx.send(f"`{streamer_login}` not found on Mod list.")
+
 @remove_mod_streamer.error
 async def remove_mod_streamer_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument): await ctx.send("Usage: `!removemodstreamer <username>`")
-    elif isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in removemodstreamer: {error}", exc_info=True); await ctx.send("❌ Error.")
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Usage: `!removemodstreamer <username>`")
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in removemodstreamer: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
 @bot.command(name='listmodstreamers', help='Lists watched Mod streamers.')
 @is_allowed_user()
 async def list_mod_streamers(ctx):
     streamers = load_data(MOD_STREAMERS_FILE)
-    if not streamers: await ctx.send("Mod watchlist is empty.")
-    else: await ctx.send(embed=discord.Embed(title="🛡️ Mod Watchlist", description="\n".join([f"- `{s}`" for s in sorted(streamers)]), color=discord.Color.green()))
+    if not streamers:
+        await ctx.send("Mod watchlist is empty.")
+    else:
+        embed = discord.Embed(title="🛡️ Mod Watchlist", description="\n".join([f"- `{s}`" for s in sorted(streamers)]), color=discord.Color.green())
+        await ctx.send(embed=embed)
+
 @list_mod_streamers.error
 async def list_mod_streamers_error(ctx, error):
-    if isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in listmodstreamers: {error}", exc_info=True); await ctx.send("❌ Error.")
-# Channel Config Commands
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in listmodstreamers: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
+# --- Channel Configuration Commands ---
 @bot.command(name='setvipchannel', help='Sets channel ID for VIP alerts.')
 @is_allowed_user()
 async def set_vip_channel(ctx, channel_id_str: str):
-    global VIP_CHANNEL_ID; try: new_channel_id = int(channel_id_str)
-    except ValueError: await ctx.send("⚠️ Invalid Channel ID."); return
+    global VIP_CHANNEL_ID
+    try:
+        new_channel_id = int(channel_id_str)
+    except ValueError:
+        await ctx.send("⚠️ Invalid Channel ID.")
+        return
     target_channel = ctx.bot.get_channel(new_channel_id)
-    if not target_channel or not isinstance(target_channel, discord.TextChannel): await ctx.send(f"⚠️ Invalid/inaccessible text channel ID `{new_channel_id}`."); return
+    if not target_channel or not isinstance(target_channel, discord.TextChannel):
+        await ctx.send(f"⚠️ Invalid/inaccessible text channel ID `{new_channel_id}`.")
+        return
     try:
         dotenv_path = find_dotenv() or os.path.join(os.path.dirname(__file__), '.env')
-        if not os.path.exists(dotenv_path): logger.error("Could not find .env file."); await ctx.send("❌ Critical error: .env file missing."); return
-        if set_key(dotenv_path, "VIP_CHANNEL_ID", str(new_channel_id)): VIP_CHANNEL_ID = new_channel_id; logger.info(f"VIP Channel set to {new_channel_id} by {ctx.author}"); await ctx.send(f"✅ VIP channel set to {target_channel.mention}.")
-        else: logger.error(f"Failed to update VIP_CHANNEL_ID in {dotenv_path}"); await ctx.send("❌ Error updating config.")
-    except Exception as e: logger.error(f"Error setting VIP channel: {e}", exc_info=True); await ctx.send("❌ Error.")
+        if not os.path.exists(dotenv_path):
+            logger.error("Could not find .env file.")
+            await ctx.send("❌ Critical error: .env file missing.")
+            return
+        if set_key(dotenv_path, "VIP_CHANNEL_ID", str(new_channel_id)):
+            VIP_CHANNEL_ID = new_channel_id
+            logger.info(f"VIP Channel set to {new_channel_id} by {ctx.author}")
+            await ctx.send(f"✅ VIP channel set to {target_channel.mention}.")
+        else:
+            logger.error(f"Failed to update VIP_CHANNEL_ID in {dotenv_path}")
+            await ctx.send("❌ Error updating config.")
+    except Exception as e:
+        logger.error(f"Error setting VIP channel: {e}", exc_info=True)
+        await ctx.send("❌ Error.")
+
 @set_vip_channel.error
 async def set_vip_channel_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument): await ctx.send("Usage: `!setvipchannel <channel_id>`")
-    elif isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in setvipchannel: {error}", exc_info=True); await ctx.send("❌ Error.")
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Usage: `!setvipchannel <channel_id>`")
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in setvipchannel: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
 @bot.command(name='setmodchannel', help='Sets channel ID for Mod alerts.')
 @is_allowed_user()
 async def set_mod_channel(ctx, channel_id_str: str):
-    global MOD_CHANNEL_ID; try: new_channel_id = int(channel_id_str)
-    except ValueError: await ctx.send("⚠️ Invalid Channel ID."); return
+    global MOD_CHANNEL_ID
+    try:
+        new_channel_id = int(channel_id_str)
+    except ValueError:
+        await ctx.send("⚠️ Invalid Channel ID.")
+        return
     target_channel = ctx.bot.get_channel(new_channel_id)
-    if not target_channel or not isinstance(target_channel, discord.TextChannel): await ctx.send(f"⚠️ Invalid/inaccessible text channel ID `{new_channel_id}`."); return
+    if not target_channel or not isinstance(target_channel, discord.TextChannel):
+        await ctx.send(f"⚠️ Invalid/inaccessible text channel ID `{new_channel_id}`.")
+        return
     try:
         dotenv_path = find_dotenv() or os.path.join(os.path.dirname(__file__), '.env')
-        if not os.path.exists(dotenv_path): logger.error("Could not find .env file."); await ctx.send("❌ Critical error: .env file missing."); return
-        if set_key(dotenv_path, "MOD_CHANNEL_ID", str(new_channel_id)): MOD_CHANNEL_ID = new_channel_id; logger.info(f"Mod Channel set to {new_channel_id} by {ctx.author}"); await ctx.send(f"✅ Mod channel set to {target_channel.mention}.")
-        else: logger.error(f"Failed to update MOD_CHANNEL_ID in {dotenv_path}"); await ctx.send("❌ Error updating config.")
-    except Exception as e: logger.error(f"Error setting Mod channel: {e}", exc_info=True); await ctx.send("❌ Error.")
+        if not os.path.exists(dotenv_path):
+            logger.error("Could not find .env file.")
+            await ctx.send("❌ Critical error: .env file missing.")
+            return
+        if set_key(dotenv_path, "MOD_CHANNEL_ID", str(new_channel_id)):
+            MOD_CHANNEL_ID = new_channel_id
+            logger.info(f"Mod Channel set to {new_channel_id} by {ctx.author}")
+            await ctx.send(f"✅ Mod channel set to {target_channel.mention}.")
+        else:
+            logger.error(f"Failed to update MOD_CHANNEL_ID in {dotenv_path}")
+            await ctx.send("❌ Error updating config.")
+    except Exception as e:
+        logger.error(f"Error setting Mod channel: {e}", exc_info=True)
+        await ctx.send("❌ Error.")
+
 @set_mod_channel.error
 async def set_mod_channel_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument): await ctx.send("Usage: `!setmodchannel <channel_id>`")
-    elif isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in setmodchannel: {error}", exc_info=True); await ctx.send("❌ Error.")
-# User Management Commands
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Usage: `!setmodchannel <channel_id>`")
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in setmodchannel: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
+# --- User Management Commands ---
 async def update_allowed_users_env():
     global ALLOWED_USER_IDS
     try:
         dotenv_path = find_dotenv() or os.path.join(os.path.dirname(__file__), '.env')
-        if not os.path.exists(dotenv_path): logger.error("Cannot find .env to update allowed users."); return False
-        ids_string = ",".join(map(str, sorted(list(ALLOWED_USER_IDS)))); success = set_key(dotenv_path, "ALLOWED_USER_IDS", ids_string)
-        if not success: logger.error(f"Failed updating ALLOWED_USER_IDS in {dotenv_path}"); return False
+        if not os.path.exists(dotenv_path):
+            logger.error("Cannot find .env to update allowed users.")
+            return False
+        ids_string = ",".join(map(str, sorted(list(ALLOWED_USER_IDS))))
+        success = set_key(dotenv_path, "ALLOWED_USER_IDS", ids_string)
+        if not success:
+            logger.error(f"Failed updating ALLOWED_USER_IDS in {dotenv_path}")
+            return False
         return True
-    except Exception as e: logger.error(f"Error updating ALLOWED_USER_IDS: {e}", exc_info=True); return False
+    except Exception as e:
+        logger.error(f"Error updating ALLOWED_USER_IDS: {e}", exc_info=True)
+        return False
+
 @bot.command(name='adduser', help='Authorizes a user ID to use commands.')
 @is_allowed_user()
 async def add_user(ctx, user_input: str):
-    global ALLOWED_USER_IDS; user_id = None
+    global ALLOWED_USER_IDS
+    user_id = None
     if user_input.startswith('<@') and user_input.endswith('>'):
         try: user_id = int(user_input.strip('<@!>'))
         except ValueError: pass
     if user_id is None:
         try: user_id = int(user_input)
-        except ValueError: await ctx.send("⚠️ Invalid User ID or @mention."); return
-    if user_id in ALLOWED_USER_IDS: await ctx.send(f"ID `{user_id}` already authorized."); return
+        except ValueError:
+            await ctx.send("⚠️ Invalid User ID or @mention.")
+            return
+    if user_id in ALLOWED_USER_IDS:
+        await ctx.send(f"ID `{user_id}` already authorized.")
+        return
     ALLOWED_USER_IDS.add(user_id)
-    if await update_allowed_users_env(): logger.info(f"{ctx.author} added authorized user: {user_id}"); await ctx.send(f"✅ Added User ID `{user_id}`.")
-    else: ALLOWED_USER_IDS.remove(user_id); await ctx.send("❌ Error saving config. User not added.")
+    if await update_allowed_users_env():
+        logger.info(f"{ctx.author} added authorized user: {user_id}")
+        await ctx.send(f"✅ Added User ID `{user_id}`.")
+    else:
+        ALLOWED_USER_IDS.remove(user_id)
+        await ctx.send("❌ Error saving config. User not added.")
+
 @add_user.error
 async def add_user_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument): await ctx.send("Usage: `!adduser <user_id_or_@mention>`")
-    elif isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in adduser: {error}", exc_info=True); await ctx.send("❌ Error.")
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Usage: `!adduser <user_id_or_@mention>`")
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in adduser: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
 @bot.command(name='removeuser', help='Removes user ID authorization.')
 @is_allowed_user()
 async def remove_user(ctx, user_input: str):
-    global ALLOWED_USER_IDS; user_id = None
+    global ALLOWED_USER_IDS
+    user_id = None
     if user_input.startswith('<@') and user_input.endswith('>'):
         try: user_id = int(user_input.strip('<@!>'))
         except ValueError: pass
     if user_id is None:
         try: user_id = int(user_input)
-        except ValueError: await ctx.send("⚠️ Invalid User ID or @mention."); return
-    if len(ALLOWED_USER_IDS) <= 1 and user_id in ALLOWED_USER_IDS: await ctx.send("🚫 Cannot remove the last authorized user."); return
-    if user_id not in ALLOWED_USER_IDS: await ctx.send(f"ID `{user_id}` not authorized."); return
+        except ValueError:
+            await ctx.send("⚠️ Invalid User ID or @mention.")
+            return
+    if len(ALLOWED_USER_IDS) <= 1 and user_id in ALLOWED_USER_IDS:
+        await ctx.send("🚫 Cannot remove the last authorized user.")
+        return
+    if user_id not in ALLOWED_USER_IDS:
+        await ctx.send(f"ID `{user_id}` not authorized.")
+        return
     ALLOWED_USER_IDS.remove(user_id)
-    if await update_allowed_users_env(): logger.info(f"{ctx.author} removed authorized user: {user_id}"); await ctx.send(f"✅ Removed User ID `{user_id}`.")
-    else: ALLOWED_USER_IDS.add(user_id); await ctx.send("❌ Error saving config. User not removed.")
+    if await update_allowed_users_env():
+        logger.info(f"{ctx.author} removed authorized user: {user_id}")
+        await ctx.send(f"✅ Removed User ID `{user_id}`.")
+    else:
+        ALLOWED_USER_IDS.add(user_id)
+        await ctx.send("❌ Error saving config. User not removed.")
+
 @remove_user.error
 async def remove_user_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument): await ctx.send("Usage: `!removeuser <user_id_or_@mention>`")
-    elif isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in removeuser: {error}", exc_info=True); await ctx.send("❌ Error.")
-# General/Status Commands
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Usage: `!removeuser <user_id_or_@mention>`")
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in removeuser: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
+# --- General / Status Commands ---
 @bot.command(name='checknow', help='Manually triggers a stream check.')
 @is_allowed_user()
 async def check_now(ctx):
     await ctx.send("⏳ Kicking off manual stream check...")
     logger.info(f"Manual check triggered by {ctx.author}")
-    if await perform_stream_check(bot): await ctx.send("✅ Manual check complete.")
-    else: await ctx.send("⚠️ Manual check issue. Check logs.")
+    if await perform_stream_check(bot):
+        await ctx.send("✅ Manual check complete.")
+    else:
+        await ctx.send("⚠️ Manual check issue. Check logs.")
+
 @check_now.error
 async def check_now_error(ctx, error):
-     if isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-     else: logger.error(f"Error in checknow: {error}", exc_info=True); await ctx.send("❌ Error.")
+     if isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+     else:
+        logger.error(f"Error in checknow: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
 @bot.command(name='status', help='Checks the bot operational status.')
 @is_allowed_user()
 async def status(ctx):
-    global last_successful_check_time; embed = discord.Embed(title="Bot Status", color=discord.Color.blue())
+    global last_successful_check_time
+    embed = discord.Embed(title="Bot Status", color=discord.Color.blue())
     loop_running = check_streams.is_running()
     embed.add_field(name="Loop Active?", value=f"{'✅ Yes' if loop_running else '❌ No'}", inline=False)
     if not loop_running:
         embed.color = discord.Color.orange()
         try:
-            task = check_streams.get_task(); exception = task.exception() if task else None
-            if exception: embed.add_field(name="Loop Error", value=f"```\n{str(exception)[:1000]}\n```", inline=False); embed.color = discord.Color.red()
+            task = check_streams.get_task()
+            exception = task.exception() if task else None
+            if exception:
+                embed.add_field(name="Loop Error", value=f"```\n{str(exception)[:1000]}\n```", inline=False)
+                embed.color = discord.Color.red()
         except Exception: pass
-    if last_successful_check_time: embed.add_field(name="Last Check", value=f"<t:{int(last_successful_check_time.timestamp())}:R>", inline=True)
-    else: embed.add_field(name="Last Check", value="N/A", inline=True)
-    vip_streamers = load_data(VIP_STREAMERS_FILE); mod_streamers = load_data(MOD_STREAMERS_FILE)
+    if last_successful_check_time:
+        embed.add_field(name="Last Check", value=f"<t:{int(last_successful_check_time.timestamp())}:R>", inline=True)
+    else:
+        embed.add_field(name="Last Check", value="N/A", inline=True)
+    vip_streamers = load_data(VIP_STREAMERS_FILE)
+    mod_streamers = load_data(MOD_STREAMERS_FILE)
     embed.add_field(name="VIPs", value=f"{len(vip_streamers)}", inline=True)
     embed.add_field(name="Mods", value=f"{len(mod_streamers)}", inline=True)
     embed.set_footer(text=f"Checked at: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z')}")
     await ctx.send(embed=embed)
+
 @status.error
 async def status_error(ctx, error):
-    if isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized.")
-    else: logger.error(f"Error in status: {error}", exc_info=True); await ctx.send("❌ Error.")
-# Help Command (LAST)
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized.")
+    else:
+        logger.error(f"Error in status: {error}", exc_info=True)
+        await ctx.send("❌ Error.")
+
+# --- Custom Help Command (DEFINED LAST) ---
 @bot.command(name='help', help='Shows available commands.')
 @is_allowed_user()
 async def custom_help(ctx):
     embed = discord.Embed(title="Bot Command Help", description="Commands only work via Direct Message (DM).", color=discord.Color.blurple())
     try:
-        vip_cmds = f"`{bot.command_prefix}addvipstreamer <username>` - {add_vip_streamer.help}\n" \
-                   f"`{bot.command_prefix}removevipstreamer <username>` - {remove_vip_streamer.help}\n" \
-                   f"`{bot.command_prefix}listvipstreamers` - {list_vip_streamers.help}\n"
+        vip_cmds = (f"`{bot.command_prefix}addvipstreamer <username>` - {add_vip_streamer.help}\n"
+                    f"`{bot.command_prefix}removevipstreamer <username>` - {remove_vip_streamer.help}\n"
+                    f"`{bot.command_prefix}listvipstreamers` - {list_vip_streamers.help}\n")
         embed.add_field(name="👑 VIP Streamer Management", value=vip_cmds, inline=False)
-        mod_cmds = f"`{bot.command_prefix}addmodstreamer <username>` - {add_mod_streamer.help}\n" \
-                   f"`{bot.command_prefix}removemodstreamer <username>` - {remove_mod_streamer.help}\n" \
-                   f"`{bot.command_prefix}listmodstreamers` - {list_mod_streamers.help}\n"
+        mod_cmds = (f"`{bot.command_prefix}addmodstreamer <username>` - {add_mod_streamer.help}\n"
+                    f"`{bot.command_prefix}removemodstreamer <username>` - {remove_mod_streamer.help}\n"
+                    f"`{bot.command_prefix}listmodstreamers` - {list_mod_streamers.help}\n")
         embed.add_field(name="🛡️ Mod Streamer Management", value=mod_cmds, inline=False)
-        config_cmds = f"`{bot.command_prefix}setvipchannel <channel_id>` - {set_vip_channel.help}\n" \
-                      f"`{bot.command_prefix}setmodchannel <channel_id>` - {set_mod_channel.help}\n" \
-                      f"`{bot.command_prefix}adduser <user_id_or_@mention>` - {add_user.help}\n" \
-                      f"`{bot.command_prefix}removeuser <user_id_or_@mention>` - {remove_user.help}\n"
+        config_cmds = (f"`{bot.command_prefix}setvipchannel <channel_id>` - {set_vip_channel.help}\n"
+                       f"`{bot.command_prefix}setmodchannel <channel_id>` - {set_mod_channel.help}\n"
+                       f"`{bot.command_prefix}adduser <user_id_or_@mention>` - {add_user.help}\n"
+                       f"`{bot.command_prefix}removeuser <user_id_or_@mention>` - {remove_user.help}\n")
         embed.add_field(name="⚙️ Configuration", value=config_cmds, inline=False)
-        # --- FIXED: Added testping to help ---
-        general_cmds = f"`{bot.command_prefix}testping` - {test_ping.help}\n" \
-                       f"`{bot.command_prefix}checknow` - {check_now.help}\n" \
-                       f"`{bot.command_prefix}status` - {status.help}\n" \
-                       f"`{bot.command_prefix}help` - {custom_help.help}\n"
+        general_cmds = (f"`{bot.command_prefix}testping` - {test_ping.help}\n"
+                        f"`{bot.command_prefix}checknow` - {check_now.help}\n"
+                        f"`{bot.command_prefix}status` - {status.help}\n"
+                        f"`{bot.command_prefix}help` - {custom_help.help}\n")
         embed.add_field(name="ℹ️ General / Status", value=general_cmds, inline=False)
         embed.set_footer(text="Commands only work when sent via Direct Message (DM).")
         await ctx.send(embed=embed)
-    except NameError as e: logger.error(f"Help failed - command definition order issue?: {e}"); await ctx.send("❌ Error building help.")
-    except Exception as e: logger.error(f"Unexpected help error: {e}", exc_info=True); await ctx.send("❌ Error generating help.")
+    except NameError as e:
+        logger.error(f"Help failed - command definition order issue?: {e}")
+        await ctx.send("❌ Error building help.")
+    except Exception as e:
+        logger.error(f"Unexpected help error: {e}", exc_info=True)
+        await ctx.send("❌ Error generating help.")
+
 @custom_help.error
 async def custom_help_error(ctx, error):
-    if isinstance(error, commands.CommandInvokeError): error = error.original
-    if isinstance(error, commands.CheckFailure): await ctx.send("🚫 Unauthorized to use help.")
-    else: logger.error(f"Error in help processing: {error}", exc_info=True); await ctx.send("❌ Error displaying help.")
+    if isinstance(error, commands.CommandInvokeError):
+        error = error.original
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send("🚫 Unauthorized to use help.")
+    else:
+        logger.error(f"Error in help processing: {error}", exc_info=True)
+        await ctx.send("❌ Error displaying help.")
 
 
 # --- Background Tasks ---
@@ -614,10 +810,12 @@ async def before_check_streams():
 
 @check_streams.after_loop
 async def after_check_streams():
-    if check_streams.is_being_cancelled(): logger.info("Stream check loop cancelled.")
+    if check_streams.is_being_cancelled():
+        logger.info("Stream check loop cancelled.")
     elif check_streams.get_task() and check_streams.get_task().done() and (exc := check_streams.get_task().exception()):
          logger.error(f"Stream check loop stopped unexpectedly! Reason: {exc}", exc_info=exc)
-    else: logger.warning("Stream check loop finished or state unclear.")
+    else:
+        logger.warning("Stream check loop finished or state unclear.")
 
 ping_sent_for_this_week = False
 @tasks.loop(minutes=1.0)
